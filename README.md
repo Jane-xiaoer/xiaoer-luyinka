@@ -1,0 +1,52 @@
+# 小耳录音卡（自用长时录音卡，Mac 本地转写）
+
+目标：出门磁吸手机录音，回家 Mac 自动拉文件 + 本地转写（SenseVoice / mlx-whisper），不交飞书 68 元/月。
+
+## 硬件（2026-10-14 选定，待下单）
+- 淘宝「华天电子用品店」开源录音卡，选 **蓝牙版 239 元**（主控 惠联 W20；Wi-Fi+蓝牙版 409 元，主控 杰理 AC7911）
+  - 选蓝牙版理由：两版协议相同，蓝牙版 SDK（sdk518）同样有文件列表/续传下载/删除；不改固件则芯片无所谓；蓝牙慢但夜里充电时后台拉即可
+  - 退路：Mac BLE 连不上或拉文件不稳 → 7 天内退，换 Wi-Fi 版
+- 400mAh，标称续航 20h，磁吸；磁吸线**只能充电不能传数据**，文件只能走 BLE / Wi-Fi
+- 7 天无理由退货（商品页标注；客服机器人说「非质量问题不退」与页面矛盾，以页面为准）
+- 厂商资料：`vendor/sdk包与说明.zip`（腾讯文档拿到，2026-10-14），解压在 `vendor/raw/recoder/`
+
+## 协议要点（`录音笔与app端协议_WIFI&蓝牙更新.pdf`）
+- Wi-Fi：设备开热点当 TCP 服务器，`192.168.1.1:27689`，Mac 当客户端
+- BLE：Service `0xAE20`；`0xAE21` 写、`0xAE22` 通知、`0xAE23` 按键通知、`0xAE24` OTA
+- 包格式：`0x5A` 魔数 + 1B 包序号 + 2B CRC16/XMODEM(长度+数据) + 2B 长度 + 数据（首字节=类型：0 控制 / 1 音频 / 2 文件 / 3 ACK）；收到要回同序号 ACK
+- 文件操作（类型 2）：0 取列表 → 2 请求导入（4B offset 支持续传 + 20B 文件名）→ 4 数据 → 5 结束；8 删除指定、9 删除全部
+- 列表每条 28B：4B 时间(秒) + 4B 大小 + 20B 文件名（`note20251231121212`，`.opus` 后缀不上报）
+- 控制命令（类型 0）：同步时间、容量、电量、开/关 Wi-Fi 传输（19/20）、实时转写流
+- 音频：**裸 Opus 帧，16kHz 单声道，每帧 40 字节**（无 Ogg 封装，需自己按帧解码）
+- 小端/大端：文档里标注的多字段为小端
+- SDK 文档里没有 appkey / license / 账号绑定要求
+
+### SDK 反编译后发现的文档错误（以代码为准，已写进 `luyinka/protocol.py`）
+- 文件列表里的 数量/时间/大小 是**大端**（文档写小端）；请求下载的 offset 是小端
+- 请求下载/删除用的文件名要带 `.opus`（列表里上报的名字以 `.` 结尾，SDK 自己补 `opus`）
+- 删除单个文件：命令号后留 4 个 0 字节再接文件名
+- SDK 收包**不校验 CRC、不回 ACK**（文档说要回）；BLE 每次通知就是一整包，写入超过 256 字节切片
+- SDK 里有个 `xiaoyiinfo.com` 服务器地址，**没有任何地方调用**，无联网鉴权
+
+## 代码（2026-10-14 写好，未接真机）
+```
+bin/luyinka scan            # 找卡
+bin/luyinka info            # 电量 / 容量 / 固件
+bin/luyinka list            # 卡上录音
+bin/luyinka pull [--delete] # 下载新录音 → 音频/*.ogg → 文字/*.md（--delete 转完删卡上的）
+bin/luyinka transcribe F    # 转写任意本地音频（也吃卡上导出的裸 .opus）
+bin/luyinka -v --ack ...    # 调试：打印所有包 / 收包回 ACK
+```
+- 产出：`~/Desktop/works/小耳录音卡/{原始,音频,文字}/`（`LUYINKA_HOME` 可改）；进度 `state.json`
+- `luyinka/protocol.py` 封包拆包 · `device.py` 列表/续传下载/删除 · `ble.py` bleak 传输 · `opus_ogg.py` 裸帧→Ogg · `transcribe.py` silero VAD + SenseVoice（模型复用 `~/projects/RTC`）· `pipeline.py` 串起来
+- 测试：`.venv/bin/python -m pytest -q`（`tests/fake_device.py` 是按 SDK 回包的假卡）
+- 实测：3 小时录音转写 55 秒、时间戳 3 小时漂移 ≤1 秒、内存恒定约 900MB（主要是模型）
+
+## 到货后（7 天退货期内）
+1. `bin/luyinka scan` → 扫不到：卡开机？手机 App 没连着它？
+2. `bin/luyinka -v info` → 没回包就加 `--ack` 再试（文档说要回 ACK）
+3. `bin/luyinka -v list` → 看文件名、大小对不对（大小端判断在 `parse_file_list`）
+4. 录一段 1 分钟 → `bin/luyinka pull` → 听 `音频/*.ogg`、看 `文字/*.md`
+5. 量蓝牙速度：1 小时录音拉多久（估计几分钟）
+6. 续航：带出门录一整天
+7. 都过了 → 做成自动（launchd 定时 `pull --delete` + 桌宠报结果）
