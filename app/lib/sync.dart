@@ -6,28 +6,66 @@ import 'card/protocol.dart';
 import 'cloud.dart';
 import 'store.dart';
 
-typedef LinkFactory = Future<Link?> Function(); // 扫卡并连上；扫不到返回 null
+typedef LinkFactory = Future<Link?> Function(String id); // 只连这一张；不在旁边返回 null
+typedef CardScanner = Future<List<CardChoice>> Function(); // 附近所有的卡，信号强的在前
+
+/// 附近扫到的一张卡。
+class CardChoice {
+  final String id, label;
+  final int? rssi;
+  CardChoice(this.id, this.label, this.rssi);
+}
 
 class CardState {
   bool connected = false;
   bool scanning = false;
   CardInfo? info;
-  String? name;
   String? error;
   DateTime? lastSeen;
+  List<CardChoice> choices = []; // 第一次就扫到好几张：等用户自己点
 }
 
 class Syncer {
   final Store store;
   final Cloud cloud;
   final LinkFactory connect;
+  final CardScanner scan;
   final String Function() timezone;
   final card = CardState();
   bool _busy = false;
   Timer? _timer;
   void Function()? onChange;
 
-  Syncer(this.store, this.cloud, this.connect, this.timezone);
+  Syncer(this.store, this.cloud, this.connect, this.scan, this.timezone);
+
+  /// 认准的那张卡（第一次连上就锁定，只在「换一张卡」时改）。
+  String? get boundId => store.settings['device'] as String?;
+  String get boundName => (store.settings['deviceName'] as String?) ?? '录音卡';
+
+  void bind(CardChoice c) {
+    store.settings['device'] = c.id;
+    store.settings['deviceName'] = c.label;
+    card
+      ..choices = []
+      ..info = null
+      ..lastSeen = null
+      ..error = null;
+    _changed();
+    run();
+  }
+
+  /// 给「选卡」列表用：等手上这一轮跑完再扫，免得跟同步抢蓝牙。
+  Future<List<CardChoice>> scanNearby() async {
+    while (_busy) {
+      await Future.delayed(const Duration(milliseconds: 300));
+    }
+    _busy = true;
+    try {
+      return await scan();
+    } finally {
+      _busy = false;
+    }
+  }
 
   void _changed() {
     store.save();
@@ -81,7 +119,17 @@ class Syncer {
     _changed();
     Link? link;
     try {
-      link = await connect();
+      if (boundId == null) {
+        final seen = await scan();
+        if (seen.length == 1) {
+          store.settings['device'] = seen.first.id;
+          store.settings['deviceName'] = seen.first.label;
+          card.choices = [];
+        } else {
+          card.choices = seen; // 0 张：接着等；好几张：让用户点
+        }
+      }
+      if (boundId != null) link = await connect(boundId!);
     } catch (e) {
       card.error = '连不上卡：$e';
     } finally {

@@ -1,6 +1,7 @@
 // 设置：整理规则（交给 Agent 时带上）· 同步完删卡上的文件 · 云端地址（一般不用动）。
 import 'package:flutter/material.dart';
 
+import 'cards.dart';
 import 'cloud.dart';
 import 'handoff.dart';
 import 'store.dart';
@@ -41,8 +42,23 @@ void showSettings(BuildContext context, Store store, Syncer syncer) {
               const Text('云端地址（一般不用动）', style: TextStyle(fontWeight: FontWeight.w600)),
               TextField(controller: cloud, style: const TextStyle(fontSize: 14, color: K.mute)),
               const SizedBox(height: 10),
-              Text('卡：${syncer.card.info?.version ?? '还没连过'} · 剩余空间 ${syncer.card.info?.freeKb == null ? '—' : '${(syncer.card.info!.freeKb! / 1024 / 1024).toStringAsFixed(1)} GB'}',
-                  style: const TextStyle(color: K.faint, fontSize: 13)),
+              Row(children: [
+                Expanded(
+                  child: Text(
+                    syncer.boundId == null
+                        ? '卡：还没选'
+                        : '卡：${syncer.boundName}${syncer.card.info?.version == null ? '' : ' · ${syncer.card.info!.version}'} · 剩余空间 ${syncer.card.info?.freeKb == null ? '—' : '${(syncer.card.info!.freeKb! / 1024 / 1024).toStringAsFixed(1)} GB'}',
+                    style: const TextStyle(color: K.faint, fontSize: 13),
+                  ),
+                ),
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    showCardPicker(context, syncer);
+                  },
+                  child: Text(syncer.boundId == null ? '选卡' : '换一张卡'),
+                ),
+              ]),
             ]),
           ),
         ),

@@ -20,11 +20,17 @@ Future<void> main() async {
   final store = Store(dir);
   await store.load();
   final cloud = Cloud((store.settings['cloud'] as String?) ?? defaultCloud, token: store.settings['token'] as String?);
-  final syncer = Syncer(store, cloud, () async {
-    final link = await BleLink.find(preferId: store.settings['device'] as String?);
-    if (link != null) store.settings['device'] = link.id;
-    return link;
-  }, deviceTimezone);
+  final syncer = Syncer(
+    store,
+    cloud,
+    (id) async {
+      final link = await BleLink.find(id);
+      if (link != null) store.settings['deviceName'] ??= BleLink.label(link.device); // 旧版只记了 id
+      return link;
+    },
+    () async => [for (final d in await BleLink.scan()) CardChoice(d.deviceId, BleLink.label(d), d.rssi)],
+    deviceTimezone,
+  );
   runApp(LuyinkaApp(store: store, syncer: syncer));
   syncer.start();
 }

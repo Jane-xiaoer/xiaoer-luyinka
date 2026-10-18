@@ -90,12 +90,15 @@ class Store extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> save() async {
-    final tmp = File('${_state.path}.tmp');
-    await tmp.writeAsString(jsonEncode({'settings': settings, 'recs': recs.values.map((r) => r.toJson()).toList()}));
-    await tmp.rename(_state.path);
-    notifyListeners();
-  }
+  Future<void> _saving = Future.value();
+
+  /// 排队写：同步时会连着存好几次，并发写同一个临时文件会互相踩。
+  Future<void> save() => _saving = _saving.catchError((_) {}).then((_) async {
+        final tmp = File('${_state.path}.tmp');
+        await tmp.writeAsString(jsonEncode({'settings': settings, 'recs': recs.values.map((r) => r.toJson()).toList()}));
+        await tmp.rename(_state.path);
+        notifyListeners();
+      });
 
   Future<void> _loadScenes(String stem) async {
     final f = result(stem);

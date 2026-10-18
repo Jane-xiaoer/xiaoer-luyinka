@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 
+import 'cards.dart';
 import 'cloud.dart';
 import 'handoff.dart';
 import 'settings.dart';
@@ -142,13 +143,15 @@ class TopBar extends StatelessWidget {
     }
     final working = pend.where((r) => ['pulled', 'uploading', 'processing'].contains(r.stage)).length;
     if (working > 0) return '云端整理中 · $working 段';
+    final name = syncer.boundName;
     if (c.connected) {
       final b = c.info?.battery;
-      return '录音卡已连接${b == null ? '' : ' · ${c.info!.charging ? '充电中' : '电量 $b%'}'}';
+      return '$name 已连接${b == null ? '' : ' · ${c.info!.charging ? '充电中' : '电量 $b%'}'}';
     }
-    if (c.scanning) return '正在找录音卡…';
-    if (c.lastSeen != null) return '上次同步 ${hm(c.lastSeen!)}';
-    return c.error ?? '把录音卡开机，放在旁边';
+    if (syncer.boundId == null) return c.scanning ? '正在找录音卡…' : '把录音卡开机，放在旁边';
+    if (c.scanning) return '正在找 $name…';
+    if (c.lastSeen != null) return '$name · 上次同步 ${hm(c.lastSeen!)}';
+    return c.error ?? '等 $name 靠近';
   }
 
   @override
@@ -169,6 +172,15 @@ class TopBar extends StatelessWidget {
         Container(width: 8, height: 8, decoration: BoxDecoration(color: live ? K.greenLive : K.line, shape: BoxShape.circle)),
         const SizedBox(width: 8),
         Flexible(child: Text(_status(), overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13, color: K.mute))),
+        if (syncer.boundId == null && syncer.card.choices.length > 1)
+          Padding(
+            padding: const EdgeInsets.only(left: 8),
+            child: FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: K.green, minimumSize: const Size(0, 32)),
+              onPressed: () => showCardPicker(context, syncer),
+              child: Text('附近有 ${syncer.card.choices.length} 张卡，选你的'),
+            ),
+          ),
         IconButton(
           tooltip: '现在同步',
           icon: const Icon(Icons.refresh, size: 18, color: K.mute),

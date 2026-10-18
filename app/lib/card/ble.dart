@@ -23,26 +23,37 @@ class BleLink implements Link {
 
   BleLink._(this.device);
 
-  /// 扫 [timeout]，找到信号最强的卡就连上；没有返回 null。[preferId] 是上次连过的那张。
-  static Future<BleLink?> find({Duration timeout = const Duration(seconds: 6), String? preferId}) async {
+  /// 扫 [timeout]，列出附近所有的卡（信号强的在前）。给了 [until] 就扫到那张为止。
+  static Future<List<BleDevice>> scan({Duration timeout = const Duration(seconds: 6), String? until}) async {
     await UniversalBle.requestPermissions();
     final found = <String, BleDevice>{};
     final sub = UniversalBle.scanStream.listen((d) {
-      if (d.services.contains(service) || d.deviceId == preferId) found[d.deviceId] = d;
+      if (d.services.contains(service) || d.deviceId == until) found[d.deviceId] = d;
     });
     await UniversalBle.startScan(scanFilter: ScanFilter(withServices: [service]));
     final end = DateTime.now().add(timeout);
-    while (DateTime.now().isBefore(end) && !(preferId != null && found.containsKey(preferId))) {
+    while (DateTime.now().isBefore(end) && !(until != null && found.containsKey(until))) {
       await Future.delayed(const Duration(milliseconds: 300));
     }
     await UniversalBle.stopScan();
     await sub.cancel();
-    if (found.isEmpty) return null;
-    final best = found[preferId] ??
-        (found.values.toList()..sort((a, b) => (b.rssi ?? -999).compareTo(a.rssi ?? -999))).first;
-    final link = BleLink._(best);
+    return found.values.toList()..sort((a, b) => (b.rssi ?? -999).compareTo(a.rssi ?? -999));
+  }
+
+  /// 只连 [id] 这一张；它不在旁边就返回 null，别人的卡一律不碰。
+  static Future<BleLink?> find(String id) async {
+    final d = (await scan(until: id)).where((d) => d.deviceId == id).firstOrNull;
+    if (d == null) return null;
+    final link = BleLink._(d);
     await link._open();
     return link;
+  }
+
+  /// 卡名 + 编号尾号，好认是哪张。
+  static String label(BleDevice d) {
+    final hex = d.deviceId.replaceAll(RegExp('[^0-9A-Fa-f]'), '').toUpperCase();
+    final name = (d.name ?? '').trim().isEmpty ? '录音卡' : d.name!.trim();
+    return hex.length < 4 ? name : '$name · ${hex.substring(hex.length - 4)}';
   }
 
   String get id => device.deviceId;
