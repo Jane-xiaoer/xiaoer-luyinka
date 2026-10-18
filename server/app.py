@@ -227,14 +227,14 @@ def download_page() -> str:
             return f'<div class="b off">{label}<small>还没上传</small></div>'
         return f'<a class="b" href="/download/{quote(name)}" download>{label}<small>{sub}</small></a>'
     return f"""<!doctype html><html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>小耳录音卡</title><style>
+<title>小耳录音卡</title><link rel="icon" href="/icon.png"><link rel="apple-touch-icon" href="/icon.png"><style>
 body{{margin:0;background:#f3f2ee;color:#2b2a26;font-family:-apple-system,"PingFang SC","Noto Sans SC",sans-serif}}
 main{{max-width:560px;margin:0 auto;padding:72px 20px}} h1{{font-family:"Songti SC","Noto Serif SC",serif;font-size:40px;margin:0 0 12px}}
 p{{color:#5d5a52;line-height:1.8;margin:0 0 32px}} .b{{display:flex;flex-direction:column;gap:4px;padding:18px 20px;border-radius:14px;
 background:#2b2a26;color:#f3f2ee;text-decoration:none;font-size:18px;font-weight:600;margin-bottom:12px}}
 .b small{{font-size:13px;font-weight:400;opacity:.75}} .b.off{{background:#e2dfd6;color:#7a776d}}
 ol{{color:#5d5a52;line-height:1.9;padding-left:20px}}</style></head><body><main>
-<h1>小耳录音卡</h1><p>录音卡别在身上录一整天，放回手机或电脑旁边，自动拉过来、转成文字、按话题整理好。点一下就能交给你的 AI。</p>
+<img src="/icon.png" width="96" height="96" alt="" style="display:block;margin:0 0 16px -8px"><h1>小耳录音卡</h1><p>录音卡别在身上录一整天，放回手机或电脑旁边，自动拉过来、转成文字、按话题整理好。点一下就能交给你的 AI。</p>
 {btn(mac, "下载 Mac 版", "macOS · 拖进「应用程序」就能用")}
 {btn(apk, "下载安卓版", "安卓手机 · 下载后点开安装（要允许安装未知来源应用）")}
 <ol><li>录音卡开机，放在旁边。</li><li>打开 App，第一次点「允许」使用蓝牙。</li><li>录音会自动出现，一天一页。</li></ol>
@@ -272,6 +272,8 @@ class H(BaseHTTPRequestHandler):
             return self.send(200, {"ok": True, "queue": JOBS.qsize()})
         if u.path in ("/", "/download", "/download/"):
             return self.send(200, download_page().encode(), "text/html; charset=utf-8")
+        if u.path in ("/icon.png", "/favicon.ico"):
+            return self.send(200, (Path(__file__).resolve().parent / "icon.png").read_bytes(), "image/png")
         if u.path.startswith("/download/"):
             name = unquote(u.path[len("/download/"):])
             p = DATA / "download" / name
