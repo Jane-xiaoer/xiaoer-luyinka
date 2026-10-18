@@ -36,6 +36,30 @@ ThemeData buildTheme() {
   );
 }
 
+/// 小耳：绿色毛绒猫耳小怪。stand 平常 / wave 打招呼（空的时候）/ sleep 等卡（卡不在旁边）。
+class Mascot extends StatelessWidget {
+  final String pose;
+  final double size;
+  const Mascot(this.pose, {super.key, this.size = 40});
+  @override
+  Widget build(BuildContext context) =>
+      Image.asset('assets/mascot/$pose.png', height: size, filterQuality: FilterQuality.medium);
+}
+
+/// 分类的颜色：同一类永远同一个色，一眼分得开。
+(Color, Color) categoryColors(String c) {
+  const palette = [
+    (Color(0xFFE4EED8), Color(0xFF3D6A1B)), // 绿
+    (Color(0xFFE3ECF4), Color(0xFF2F5878)), // 蓝
+    (Color(0xFFF6E6D2), Color(0xFF8A4F12)), // 橙
+    (Color(0xFFEFE4F1), Color(0xFF6B3F78)), // 紫
+    (Color(0xFFF4E1E1), Color(0xFF8A3434)), // 红
+    (Color(0xFFE6EEEC), Color(0xFF2F6A60)), // 青
+  ];
+  const fixed = {'自言自语': 0, '与人对话': 1, '打电话': 1, '商业洽谈': 2, '开会': 2, '学习听课': 3, '嘉宾分享': 4, '生活日常': 5};
+  return palette[fixed[c] ?? (c.codeUnits.fold<int>(0, (a, b) => a + b) % palette.length)];
+}
+
 class Chip2 extends StatelessWidget {
   final String text;
   final bool todo;
@@ -43,8 +67,9 @@ class Chip2 extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 2),
-        decoration: BoxDecoration(color: todo ? K.todoSoft : K.greenSoft, borderRadius: BorderRadius.circular(99)),
-        child: Text(text, style: TextStyle(fontSize: 12, color: todo ? K.todo : const Color(0xFF3D6A1B))),
+        decoration: BoxDecoration(
+            color: todo ? K.todoSoft : categoryColors(text).$1, borderRadius: BorderRadius.circular(99)),
+        child: Text(text, style: TextStyle(fontSize: 12, color: todo ? K.todo : categoryColors(text).$2)),
       );
 }
 

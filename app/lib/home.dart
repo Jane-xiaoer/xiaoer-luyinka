@@ -61,6 +61,8 @@ class _HomeState extends State<Home> {
     return l.firstWhere((s) => s.id == _sceneId, orElse: () => l.firstWhere((s) => s.todo > 0, orElse: () => l.first));
   }
 
+  void _handoff() => showHandoff(context, store, day, scenes);
+
   void pickDay(String d) => setState(() {
         _day = d;
         _sceneId = null;
@@ -72,8 +74,11 @@ class _HomeState extends State<Home> {
     return Scaffold(
       body: SafeArea(
         child: Column(children: [
-          TopBar(syncer: widget.syncer, store: store, onHandoff: () => showHandoff(context, store, day, scenes)),
-          Expanded(child: wide ? _wide() : _narrow()),
+          if (!wide) TopBar(syncer: widget.syncer, store: store, onHandoff: _handoff),
+          Expanded(
+            // Mac 顶上 34pt 拖窗口由 MainFlutterWindow.swift 接管，那条里别放按钮
+            child: wide ? _wide() : _narrow(),
+          ),
           if (wide)
             ListenableBuilder(
                 listenable: player, builder: (_, _) => player.stem == null ? const SizedBox() : PlayerBar(player: player)),
@@ -83,16 +88,19 @@ class _HomeState extends State<Home> {
   }
 
   Widget _wide() => Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        SizedBox(width: 200, child: DayNav(store: store, day: day, onPick: pickDay)),
+        SizedBox(width: 228, child: Sidebar(store: store, syncer: widget.syncer, day: day, onPick: pickDay)),
         const VerticalDivider(width: 1),
         SizedBox(
           width: (MediaQuery.sizeOf(context).width * 0.36).clamp(360, 470).toDouble(),
           child: DayColumn(
-              store: store, day: day, scenes: scenes, selected: scene?.id,
+              store: store, day: day, scenes: scenes, selected: scene?.id, onHandoff: _handoff,
               onPick: (s) => setState(() => _sceneId = s.id)),
         ),
         const VerticalDivider(width: 1),
-        Expanded(child: scene == null ? const SizedBox() : SceneDetail(scene: scene!, player: player, store: store)),
+        Expanded(
+            child: scene == null
+                ? const Hint('sleep', '还没有内容', '有录音以后，点左边任意一段，这里看要点和逐字稿。')
+                : SceneDetail(scene: scene!, player: player, store: store, top: 44)),
       ]);
 
   Widget _narrow() => Column(children: [
@@ -125,7 +133,33 @@ class _HomeState extends State<Home> {
       ]);
 }
 
-// ───────── 顶栏：卡的状态 + 交给 Agent ─────────
+// ───────── 卡的状态（左栏卡片 / 手机顶栏共用）─────────
+
+/// (标题, 一行状态)
+(String, String) cardStatus(Syncer syncer, Store store) {
+  final c = syncer.card;
+  final title = syncer.boundId == null ? '录音卡' : syncer.boundName;
+  final pend = store.pending;
+  final pulling = pend.where((r) => r.stage == 'pulling').toList();
+  if (pulling.isNotEmpty) {
+    final r = pulling.first;
+    return (title, '正在拉录音 ${r.size > 0 ? (r.got * 100 ~/ r.size) : 0}%');
+  }
+  final working = pend.where((r) => ['pulled', 'uploading', 'processing'].contains(r.stage)).length;
+  if (working > 0) return (title, '云端整理中 · $working 段');
+  if (c.connected) {
+    final b = c.info?.battery;
+    return (title, '已连接${b == null ? '' : ' · ${c.info!.charging ? '充电中' : '电量 $b%'}'}');
+  }
+  if (c.scanning) return (title, '正在找…');
+  if (syncer.boundId == null) return (title, c.choices.length > 1 ? '附近有 ${c.choices.length} 张卡' : '开机后放在旁边');
+  if (c.lastSeen != null) return (title, '上次同步 ${hm(c.lastSeen!)}');
+  return (title, c.error ?? '不在旁边，等它靠近');
+}
+
+bool _live(Syncer syncer, Store store) => syncer.card.connected || store.pending.isNotEmpty;
+
+// ───────── 手机顶栏：卡的状态 + 交给 Agent ─────────
 
 class TopBar extends StatelessWidget {
   final Syncer syncer;
@@ -133,72 +167,81 @@ class TopBar extends StatelessWidget {
   final VoidCallback onHandoff;
   const TopBar({super.key, required this.syncer, required this.store, required this.onHandoff});
 
-  String _status() {
-    final c = syncer.card;
-    final pend = store.pending;
-    final pulling = pend.where((r) => r.stage == 'pulling').toList();
-    if (pulling.isNotEmpty) {
-      final r = pulling.first;
-      return '正在从卡上拉录音 ${r.size > 0 ? (r.got * 100 ~/ r.size) : 0}%';
-    }
-    final working = pend.where((r) => ['pulled', 'uploading', 'processing'].contains(r.stage)).length;
-    if (working > 0) return '云端整理中 · $working 段';
-    final name = syncer.boundName;
-    if (c.connected) {
-      final b = c.info?.battery;
-      return '$name 已连接${b == null ? '' : ' · ${c.info!.charging ? '充电中' : '电量 $b%'}'}';
-    }
-    if (syncer.boundId == null) return c.scanning ? '正在找录音卡…' : '把录音卡开机，放在旁边';
-    if (c.scanning) return '正在找 $name…';
-    if (c.lastSeen != null) return '$name · 上次同步 ${hm(c.lastSeen!)}';
-    return c.error ?? '等 $name 靠近';
-  }
-
   @override
   Widget build(BuildContext context) {
-    final live = syncer.card.connected || store.pending.isNotEmpty;
+    final (title, sub) = cardStatus(syncer, store);
     return Container(
-      height: 52,
-      // Mac：标题栏透明，左边让出红绿灯的位置
-      padding: EdgeInsets.only(left: Platform.isMacOS ? 78 : 16, right: 16),
+      height: 56,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: const BoxDecoration(color: K.bar, border: Border(bottom: BorderSide(color: K.line))),
       child: Row(children: [
+        Mascot(_live(syncer, store) ? 'stand' : 'sleep', size: 36),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(title, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+            Text(sub, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: K.mute)),
+          ]),
+        ),
+        if (syncer.boundId == null && syncer.card.choices.length > 1)
+          TextButton(onPressed: () => showCardPicker(context, syncer), child: const Text('选卡')),
         IconButton(
           tooltip: '设置',
           icon: const Icon(Icons.tune, size: 20, color: K.mute),
           onPressed: () => showSettings(context, store, syncer),
         ),
-        const Spacer(),
-        Container(width: 8, height: 8, decoration: BoxDecoration(color: live ? K.greenLive : K.line, shape: BoxShape.circle)),
-        const SizedBox(width: 8),
-        Flexible(child: Text(_status(), overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13, color: K.mute))),
-        if (syncer.boundId == null && syncer.card.choices.length > 1)
-          Padding(
-            padding: const EdgeInsets.only(left: 8),
-            child: FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: K.green, minimumSize: const Size(0, 32)),
-              onPressed: () => showCardPicker(context, syncer),
-              child: Text('附近有 ${syncer.card.choices.length} 张卡，选你的'),
-            ),
-          ),
-        IconButton(
-          tooltip: '现在同步',
-          icon: const Icon(Icons.refresh, size: 18, color: K.mute),
-          onPressed: () => syncer.run(),
-        ),
-        const Spacer(),
-        FilledButton.icon(
-          style: FilledButton.styleFrom(backgroundColor: K.ink, foregroundColor: K.paper, minimumSize: const Size(0, 36)),
-          onPressed: onHandoff,
-          icon: const Icon(Icons.arrow_forward, size: 16),
-          label: const Text('交给 Agent'),
-        ),
+        HandoffButton(onPressed: onHandoff, compact: true),
       ]),
     );
   }
 }
 
-// ───────── 左栏：日子 ─────────
+class HandoffButton extends StatelessWidget {
+  final VoidCallback onPressed;
+  final bool compact;
+  const HandoffButton({super.key, required this.onPressed, this.compact = false});
+  @override
+  Widget build(BuildContext context) => FilledButton.icon(
+        style: FilledButton.styleFrom(
+            backgroundColor: K.ink, foregroundColor: K.paper, minimumSize: Size(0, compact ? 34 : 38),
+            padding: EdgeInsets.symmetric(horizontal: compact ? 12 : 16)),
+        onPressed: onPressed,
+        icon: const Icon(Icons.arrow_forward, size: 16),
+        label: const Text('交给 Agent'),
+      );
+}
+
+// ───────── 左栏：小耳 + 日子 + 卡 ─────────
+
+class Sidebar extends StatelessWidget {
+  final Store store;
+  final Syncer syncer;
+  final String? day;
+  final void Function(String) onPick;
+  const Sidebar({super.key, required this.store, required this.syncer, required this.day, required this.onPick});
+
+  @override
+  Widget build(BuildContext context) => Container(
+        color: K.bar,
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Padding(
+            // Mac 红绿灯压在左上，往下让一点
+            padding: EdgeInsets.fromLTRB(16, Platform.isMacOS ? 46 : 20, 16, 18),
+            child: Row(children: [
+              const Mascot('stand', size: 38),
+              const SizedBox(width: 10),
+              Text('小耳录音卡', style: K.title(18)),
+            ]),
+          ),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(22, 0, 16, 6),
+            child: Text('每天', style: TextStyle(fontSize: 12, color: K.faint, fontWeight: FontWeight.w600, letterSpacing: 1)),
+          ),
+          Expanded(child: DayNav(store: store, day: day, onPick: onPick)),
+          CardPanel(syncer: syncer, store: store),
+        ]),
+      );
+}
 
 class DayNav extends StatelessWidget {
   final Store store;
@@ -207,32 +250,94 @@ class DayNav extends StatelessWidget {
   const DayNav({super.key, required this.store, required this.day, required this.onPick});
 
   @override
-  Widget build(BuildContext context) => ListView(padding: const EdgeInsets.fromLTRB(12, 18, 12, 12), children: [
-        Padding(padding: const EdgeInsets.fromLTRB(10, 0, 10, 14), child: Text('小耳录音卡', style: K.title(20))),
+  Widget build(BuildContext context) => ListView(padding: const EdgeInsets.symmetric(horizontal: 10), children: [
         for (final e in store.days.entries)
           Padding(
-            padding: const EdgeInsets.only(bottom: 4),
+            padding: const EdgeInsets.only(bottom: 2),
             child: Material(
-              color: e.key == day ? K.greenSoft : Colors.transparent,
-              borderRadius: BorderRadius.circular(9),
+              color: e.key == day ? K.card : Colors.transparent,
+              borderRadius: BorderRadius.circular(10),
               child: InkWell(
-                borderRadius: BorderRadius.circular(9),
+                borderRadius: BorderRadius.circular(10),
                 onTap: () => onPick(e.key),
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                   child: Row(children: [
                     Expanded(
                         child: Text(dayTitle(e.key, short: true),
                             style: TextStyle(
                                 fontWeight: e.key == day ? FontWeight.w600 : FontWeight.w400,
-                                color: e.key == day ? const Color(0xFF3D6A1B) : K.ink))),
-                    Text('${e.value.length} 段', style: TextStyle(color: e.key == day ? const Color(0xFF3D6A1B) : K.faint)),
+                                color: e.key == day ? K.ink : K.mute))),
+                    Text('${e.value.length}',
+                        style: TextStyle(fontSize: 12, color: e.key == day ? K.green : K.faint,
+                            fontWeight: FontWeight.w600)),
                   ]),
                 ),
               ),
             ),
           ),
       ]);
+}
+
+/// 左栏底下的卡片：卡在不在、电量、选卡；设置也在这。
+class CardPanel extends StatelessWidget {
+  final Syncer syncer;
+  final Store store;
+  const CardPanel({super.key, required this.syncer, required this.store});
+
+  @override
+  Widget build(BuildContext context) {
+    final (title, sub) = cardStatus(syncer, store);
+    final live = _live(syncer, store);
+    return Container(
+      margin: const EdgeInsets.fromLTRB(10, 8, 10, 12),
+      padding: const EdgeInsets.fromLTRB(10, 10, 6, 4),
+      decoration: BoxDecoration(color: K.card, borderRadius: BorderRadius.circular(14), border: Border.all(color: K.line)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Row(children: [
+          Mascot(live ? 'stand' : 'sleep', size: 44),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                Container(width: 7, height: 7,
+                    decoration: BoxDecoration(color: live ? K.greenLive : K.line, shape: BoxShape.circle)),
+                const SizedBox(width: 6),
+                Flexible(child: Text(title, overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600))),
+              ]),
+              const SizedBox(height: 2),
+              Text(sub, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: K.mute, height: 1.4)),
+            ]),
+          ),
+        ]),
+        if (syncer.boundId == null && syncer.card.choices.length > 1)
+          Padding(
+            padding: const EdgeInsets.only(top: 8, right: 4),
+            child: FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: K.green, minimumSize: const Size(0, 34)),
+              onPressed: () => showCardPicker(context, syncer),
+              child: const Text('选你的卡'),
+            ),
+          ),
+        Row(children: [
+          TextButton.icon(
+            style: TextButton.styleFrom(foregroundColor: K.mute, padding: const EdgeInsets.symmetric(horizontal: 6)),
+            onPressed: () => showSettings(context, store, syncer),
+            icon: const Icon(Icons.tune, size: 16),
+            label: const Text('设置', style: TextStyle(fontSize: 13)),
+          ),
+          const Spacer(),
+          IconButton(
+            tooltip: '现在同步',
+            visualDensity: VisualDensity.compact,
+            icon: const Icon(Icons.refresh, size: 18, color: K.mute),
+            onPressed: () => syncer.run(),
+          ),
+        ]),
+      ]),
+    );
+  }
 }
 
 // ───────── 中栏：当天时间线 + 问答 ─────────
@@ -243,22 +348,32 @@ class DayColumn extends StatelessWidget {
   final List<Scene> scenes;
   final String? selected;
   final void Function(Scene) onPick;
+  final VoidCallback? onHandoff; // 宽屏：「交给 Agent」放在日期右边；手机在顶栏
   const DayColumn(
-      {super.key, required this.store, required this.day, required this.scenes, required this.selected, required this.onPick});
+      {super.key, required this.store, required this.day, required this.scenes, required this.selected, required this.onPick,
+      this.onHandoff});
 
   @override
   Widget build(BuildContext context) {
-    if (day == null) return const EmptyState();
+    if (day == null) return const Hint('wave', '还没有录音', '录音卡开机、放在旁边，小耳会自动把录音拉过来、整理好。\n第一次会问你要不要用蓝牙，点允许。');
     final total = scenes.fold<Duration>(Duration.zero, (a, s) => a + s.end.difference(s.start));
     final todo = scenes.fold<int>(0, (a, s) => a + s.todo);
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       Padding(
-        padding: const EdgeInsets.fromLTRB(24, 22, 24, 10),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(dayTitle(day!), style: K.title(26)),
-          const SizedBox(height: 4),
-          Text('录了 ${duration(total)} · ${scenes.length} 个场景${todo > 0 ? ' · $todo 件要办' : ''}',
-              style: const TextStyle(fontSize: 14, color: K.mute)),
+        padding: EdgeInsets.fromLTRB(24, onHandoff != null ? 44 : 20, 20, 12),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(dayTitle(day!), style: K.title(26)),
+              const SizedBox(height: 6),
+              Wrap(spacing: 6, runSpacing: 6, children: [
+                _Stat(Icons.mic_none, '录了 ${duration(total)}'),
+                _Stat(Icons.view_agenda_outlined, '${scenes.length} 个场景'),
+                if (todo > 0) _Stat(Icons.check_circle_outline, '$todo 件要办', todo: true),
+              ]),
+            ]),
+          ),
+          if (onHandoff != null) ...[const SizedBox(width: 12), HandoffButton(onPressed: onHandoff!)],
         ]),
       ),
       Expanded(
@@ -282,18 +397,21 @@ class SceneRow extends StatelessWidget {
         padding: const EdgeInsets.only(bottom: 8),
         child: Material(
           color: selected ? K.card : Colors.transparent,
+          elevation: selected ? 0.6 : 0,
+          shadowColor: const Color(0x22000000),
           shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12), side: BorderSide(color: selected ? K.greenEdge : Colors.transparent)),
+              borderRadius: BorderRadius.circular(14), side: BorderSide(color: selected ? K.greenEdge : Colors.transparent)),
           child: InkWell(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(14),
+            hoverColor: const Color(0x0A000000),
             onTap: onTap,
             child: Padding(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.fromLTRB(12, 13, 14, 13),
               child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 SizedBox(
                     width: 52,
                     child: Text(hm(scene.start),
-                        style: TextStyle(fontSize: 13, color: selected ? K.green : K.faint,
+                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: selected ? K.green : K.faint,
                             fontFeatures: const [FontFeature.tabularFigures()]))),
                 Expanded(
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -314,17 +432,39 @@ class SceneRow extends StatelessWidget {
       );
 }
 
-class EmptyState extends StatelessWidget {
-  const EmptyState({super.key});
+class _Stat extends StatelessWidget {
+  final IconData icon;
+  final String text;
+  final bool todo;
+  const _Stat(this.icon, this.text, {this.todo = false});
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.fromLTRB(8, 3, 10, 3),
+        decoration: BoxDecoration(
+            color: todo ? K.todoSoft : K.card, borderRadius: BorderRadius.circular(99),
+            border: Border.all(color: todo ? K.todoSoft : K.line)),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(icon, size: 14, color: todo ? K.todo : K.faint),
+          const SizedBox(width: 4),
+          Text(text, style: TextStyle(fontSize: 12.5, color: todo ? K.todo : K.mute)),
+        ]),
+      );
+}
+
+/// 小耳 + 一句话：没录音 / 没选中 / 卡不在。
+class Hint extends StatelessWidget {
+  final String pose, title, body;
+  const Hint(this.pose, this.title, this.body, {super.key});
   @override
   Widget build(BuildContext context) => Center(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.all(32),
           child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Text('还没有录音', style: K.title(22)),
+            Mascot(pose, size: 150),
+            const SizedBox(height: 18),
+            Text(title, style: K.title(22)),
             const SizedBox(height: 10),
-            const Text('录音卡开机、放在旁边，App 会自动把录音拉过来、整理好。\n第一次会问你要不要用蓝牙，点允许。',
-                textAlign: TextAlign.center, style: TextStyle(color: K.mute, height: 1.7)),
+            Text(body, textAlign: TextAlign.center, style: const TextStyle(color: K.mute, height: 1.7)),
           ]),
         ),
       );
@@ -360,8 +500,14 @@ class _AskBoxState extends State<AskBox> {
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: K.card,
-        title: Text(q, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
-        content: SelectableText(answer, style: const TextStyle(fontSize: 15, height: 1.7)),
+        title: Row(children: [
+          const Mascot('wave', size: 52),
+          const SizedBox(width: 12),
+          Expanded(child: Text(q, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600))),
+        ]),
+        content: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 520),
+            child: SelectableText(answer, style: const TextStyle(fontSize: 15, height: 1.7))),
         actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('好'))],
       ),
     );
@@ -370,15 +516,18 @@ class _AskBoxState extends State<AskBox> {
   @override
   Widget build(BuildContext context) => Container(
         margin: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-        padding: const EdgeInsets.fromLTRB(14, 4, 4, 4),
+        padding: const EdgeInsets.fromLTRB(8, 5, 5, 5),
         decoration: BoxDecoration(
-            color: K.card, borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFFD6D2C6))),
+            color: K.card, borderRadius: BorderRadius.circular(16), border: Border.all(color: const Color(0xFFD6D2C6)),
+            boxShadow: const [BoxShadow(color: Color(0x0F000000), blurRadius: 12, offset: Offset(0, 3))]),
         child: Row(children: [
+          const Mascot('stand', size: 30),
+          const SizedBox(width: 8),
           Expanded(
             child: TextField(
               controller: _q,
               onSubmitted: (_) => _ask(),
-              decoration: const InputDecoration(hintText: '问问这天的录音…'),
+              decoration: const InputDecoration(hintText: '问问小耳：这天我答应了谁什么？'),
             ),
           ),
           FilledButton(
@@ -403,7 +552,8 @@ class SceneDetail extends StatelessWidget {
   final Scene scene;
   final Player player;
   final Store store;
-  const SceneDetail({super.key, required this.scene, required this.player, required this.store});
+  final double top; // 宽屏顶上留给拖动条
+  const SceneDetail({super.key, required this.scene, required this.player, required this.store, this.top = 24});
 
   double _offsetOf(String clock) {
     final st = scene.start;
@@ -413,13 +563,29 @@ class SceneDetail extends StatelessWidget {
 
   void _play(String clock) => player.play(store, scene.stem, _offsetOf(clock), clock);
 
-  Widget _box(String head, Color color, List<Widget> lines) => Container(
-        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-        decoration: BoxDecoration(color: K.card, borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFFE2DFD6))),
+  Widget _box(String head, IconData icon, Color color, List<Widget> lines, {Color? bg}) => Container(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+        decoration: BoxDecoration(
+            color: bg ?? K.card, borderRadius: BorderRadius.circular(14), border: Border.all(color: const Color(0xFFE2DFD6))),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(head, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: color)),
-          const SizedBox(height: 6),
+          Row(children: [
+            Icon(icon, size: 16, color: color),
+            const SizedBox(width: 6),
+            Text(head, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: color)),
+          ]),
+          const SizedBox(height: 8),
           ...lines,
+        ]),
+      );
+
+  Widget _point(String x, Color dot) => Padding(
+        padding: const EdgeInsets.only(bottom: 4),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 9, right: 8),
+            child: Container(width: 5, height: 5, decoration: BoxDecoration(color: dot, shape: BoxShape.circle)),
+          ),
+          Expanded(child: Text(x, style: const TextStyle(fontSize: 14, height: 1.7))),
         ]),
       );
 
@@ -431,30 +597,40 @@ class SceneDetail extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = scene;
-    final meta = [
-      '${hm(s.start)}–${hm(s.end)}', duration(s.end.difference(s.start)), s.category,
-      if (s.place.isNotEmpty) s.place, if (s.people.isNotEmpty) s.people.join('、'),
-    ].join(' · ');
+    Widget meta(IconData i, String t) => Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(i, size: 14, color: K.faint),
+          const SizedBox(width: 4),
+          Text(t, style: const TextStyle(fontSize: 13, color: K.faint)),
+        ]);
     final todo = [
       for (final a in s.actions) '${a['text']}${(a['who'] ?? '').toString().isNotEmpty ? '（${a['who']}）' : ''}',
       for (final r in s.reminders) '${r['text']}${(r['when'] ?? '').toString().isNotEmpty ? ' · ${r['when']}' : ''}',
     ];
     const body = TextStyle(fontSize: 14, height: 1.7);
-    return ListView(padding: const EdgeInsets.fromLTRB(28, 24, 28, 24), children: [
-      Text(meta, style: const TextStyle(fontSize: 13, color: K.faint)),
-      const SizedBox(height: 4),
-      SelectableText(s.title, style: K.title(24)),
+    return ListView(padding: EdgeInsets.fromLTRB(32, top, 32, 32), children: [
+      Wrap(spacing: 14, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
+        Chip2(s.category),
+        meta(Icons.schedule, '${hm(s.start)}–${hm(s.end)} · ${duration(s.end.difference(s.start))}'),
+        if (s.place.isNotEmpty) meta(Icons.place_outlined, s.place),
+        if (s.people.isNotEmpty) meta(Icons.people_outline, s.people.join('、')),
+      ]),
+      const SizedBox(height: 10),
+      SelectableText(s.title, style: K.title(26)),
       const SizedBox(height: 8),
       SelectableText(s.event, style: const TextStyle(fontSize: 15, height: 1.7)),
       const SizedBox(height: 16),
       LayoutBuilder(builder: (_, c) {
         final boxes = [
           if (s.valuable.isNotEmpty || s.views.isNotEmpty)
-            _box('有价值的内容', K.green, [for (final x in [...s.views, ...s.valuable]) Text(x, style: body)]),
-          if (todo.isNotEmpty) _box('下一步 / 提醒', K.todo, [for (final x in todo) Text(x, style: body)]),
+            _box('有价值的内容', Icons.auto_awesome_outlined, K.green,
+                [for (final x in [...s.views, ...s.valuable]) _point(x, K.greenLive)]),
+          if (todo.isNotEmpty)
+            _box('下一步 / 提醒', Icons.check_circle_outline, K.todo, [for (final x in todo) _point(x, K.todo)],
+                bg: const Color(0xFFFCF6EE)),
         ];
         if (boxes.length < 2 || c.maxWidth < 520) {
-          return Column(children: [for (final b in boxes) Padding(padding: const EdgeInsets.only(bottom: 12), child: b)]);
+          return Column(crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [for (final b in boxes) Padding(padding: const EdgeInsets.only(bottom: 12), child: b)]);
         }
         return IntrinsicHeight(
           child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -466,7 +642,7 @@ class SceneDetail extends StatelessWidget {
       }),
       if (s.memorable.isNotEmpty) ...[
         const SizedBox(height: 12),
-        _box('值得记住的', K.green, [
+        _box('值得记住的', Icons.format_quote, K.green, [
           for (final m in s.memorable)
             Padding(
               padding: const EdgeInsets.only(bottom: 4),
@@ -478,7 +654,13 @@ class SceneDetail extends StatelessWidget {
         ]),
       ],
       const SizedBox(height: 18),
-      const Text('逐字稿 · 点时间从那里听', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: K.green)),
+      const Row(children: [
+        Icon(Icons.notes, size: 16, color: K.green),
+        SizedBox(width: 6),
+        Text('逐字稿', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: K.green)),
+        SizedBox(width: 8),
+        Text('点时间从那里听', style: TextStyle(fontSize: 12, color: K.faint)),
+      ]),
       const SizedBox(height: 8),
       ListenableBuilder(
         listenable: player,
