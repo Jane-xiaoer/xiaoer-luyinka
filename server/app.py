@@ -6,6 +6,8 @@
     GET  /v1/recordings/<id>/audio            → m4a（App 里播放用）
     POST /v1/ask    {"question", "scenes":[…]} → {"answer"}           「问问我的录音」
     GET  /healthz
+    GET  /                                    下载页（Mac 安装包 + 安卓 APK，放在 <DATA>/download/）
+    GET  /download/<文件>
 
 result = {"recording", "start", "seconds", "lines": [[钟点, 文字]…], "scenes": [场景…]}（场景格式同 docs/给你的agent.md）
 
@@ -34,7 +36,7 @@ import traceback
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlparse
 from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -212,6 +214,33 @@ def ask(question: str, scenes_ctx: list) -> str:
     return re.sub(r"<think>.*?</think>", "", out, flags=re.S).strip()
 
 
+# ───────── 下载页 ─────────
+
+def download_page() -> str:
+    d = DATA / "download"
+    files = sorted(d.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True) if d.exists() else []
+    mac = next((p.name for p in files if p.suffix == ".dmg"), None)
+    apk = next((p.name for p in files if p.suffix == ".apk"), None)
+
+    def btn(name, label, sub):
+        if not name:
+            return f'<div class="b off">{label}<small>还没上传</small></div>'
+        return f'<a class="b" href="/download/{quote(name)}" download>{label}<small>{sub}</small></a>'
+    return f"""<!doctype html><html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>小耳录音卡</title><style>
+body{{margin:0;background:#f3f2ee;color:#2b2a26;font-family:-apple-system,"PingFang SC","Noto Sans SC",sans-serif}}
+main{{max-width:560px;margin:0 auto;padding:72px 20px}} h1{{font-family:"Songti SC","Noto Serif SC",serif;font-size:40px;margin:0 0 12px}}
+p{{color:#5d5a52;line-height:1.8;margin:0 0 32px}} .b{{display:flex;flex-direction:column;gap:4px;padding:18px 20px;border-radius:14px;
+background:#2b2a26;color:#f3f2ee;text-decoration:none;font-size:18px;font-weight:600;margin-bottom:12px}}
+.b small{{font-size:13px;font-weight:400;opacity:.75}} .b.off{{background:#e2dfd6;color:#7a776d}}
+ol{{color:#5d5a52;line-height:1.9;padding-left:20px}}</style></head><body><main>
+<h1>小耳录音卡</h1><p>录音卡别在身上录一整天，放回手机或电脑旁边，自动拉过来、转成文字、按话题整理好。点一下就能交给你的 AI。</p>
+{btn(mac, "下载 Mac 版", "macOS · 拖进「应用程序」就能用")}
+{btn(apk, "下载安卓版", "安卓手机 · 下载后点开安装（要允许安装未知来源应用）")}
+<ol><li>录音卡开机，放在旁边。</li><li>打开 App，第一次点「允许」使用蓝牙。</li><li>录音会自动出现，一天一页。</li></ol>
+</main></body></html>"""
+
+
 # ───────── HTTP ─────────
 
 class H(BaseHTTPRequestHandler):
@@ -241,6 +270,22 @@ class H(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         if u.path == "/healthz":
             return self.send(200, {"ok": True, "queue": JOBS.qsize()})
+        if u.path in ("/", "/download", "/download/"):
+            return self.send(200, download_page().encode(), "text/html; charset=utf-8")
+        if u.path.startswith("/download/"):
+            name = unquote(u.path[len("/download/"):])
+            p = DATA / "download" / name
+            if "/" in name or name.startswith(".") or not p.is_file():
+                return self.send(404, {"error": "没有这个文件"})
+            ctype = "application/vnd.android.package-archive" if name.endswith(".apk") else "application/octet-stream"
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(p.stat().st_size))
+            self.send_header("Content-Disposition", "attachment; filename*=UTF-8''" + quote(name))
+            self.end_headers()
+            with open(p, "rb") as f:
+                shutil.copyfileobj(f, self.wfile)
+            return
         a = self.auth()
         if not a:
             return self.send(401, {"error": "没登记，重开一下 App"})
