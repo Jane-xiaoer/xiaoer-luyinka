@@ -56,6 +56,18 @@ class Syncer {
       if (fromCard) await _pull();
       await _upload();
       await _collect();
+    } on CloudError catch (e) {
+      if (e.status == 401) {
+        // 云端不认这个登记（换了服务器 / 数据重置）：重新登记，没出结果的从头传
+        store.settings['token'] = await cloud.register();
+        for (final r in store.recs.values.where((r) => r.stage == 'processing')) {
+          r
+            ..stage = 'pulled'
+            ..job = null;
+        }
+      } else {
+        card.error = e.message;
+      }
     } catch (e) {
       card.error = e.toString();
     } finally {

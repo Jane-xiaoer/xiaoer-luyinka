@@ -6,7 +6,8 @@ import 'package:http/http.dart' as http;
 
 class CloudError implements Exception {
   final String message;
-  CloudError(this.message);
+  final int status;
+  CloudError(this.message, [this.status = 0]);
   @override
   String toString() => message;
 }
@@ -24,7 +25,7 @@ class Cloud {
   Future<Map<String, dynamic>> _json(http.Response r) async {
     final body = utf8.decode(r.bodyBytes);
     final d = body.isEmpty ? <String, dynamic>{} : jsonDecode(body) as Map<String, dynamic>;
-    if (r.statusCode != 200) throw CloudError(d['error']?.toString() ?? '云端出错（${r.statusCode}）');
+    if (r.statusCode != 200) throw CloudError(d['error']?.toString() ?? '云端出错（${r.statusCode}）', r.statusCode);
     return d;
   }
 

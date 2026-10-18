@@ -2,6 +2,14 @@
 
 目标：出门磁吸手机录音，回家 Mac 自动拉文件 + 本地转写（SenseVoice / mlx-whisper），不交飞书 68 元/月。
 
+## 给别人用：App（2026-10-18，方向 A「今天时间线」）
+**下载页 https://luyinka.blitzer.studio:8443/**（Mac 安装包 + 安卓 APK）。别人装好打开，卡放旁边就自动：蓝牙拉录音 → 传云端 → 转写 + 切场景 → 一天一页；点逐字稿的时间从那里播放；底部问这天的录音；右上「交给 Agent」= Claude Code / Codex（本机装了的话，按设置里的整理规则）· 复制给任意 AI · 分享到其他 App（安卓：飞书 / 微信 / 豆包）· 存 Markdown。
+- 代码 `app/`（Flutter，一套代码出 Mac + 安卓）：`lib/card/protocol.dart`（照 Python 版移植，`test/protocol_test.dart` 拿 Python 生成的答案逐字节对）· `card/client.dart` · `card/ble.dart`（universal_ble，BSD；flutter_blue_plus 商用要买授权所以没用）· `sync.dart` · `cloud.dart` · `home.dart`（界面）· `handoff.dart`（交给 Agent）· `settings.dart`
+- 云端 `server/app.py`：Hostinger，`/opt/luyinka-cloud`，systemd `luyinka-cloud`，https 8443（Let's Encrypt，acme.sh 走 Cloudflare DNS 自动续期），数据 `/var/lib/luyinka-cloud`；转写 = 服务器本机 SenseVoice，切场景 / 问答 = DeepSeek。更新：`server/deploy.sh hostinger-us`（会把服务改回 127.0.0.1:8790，要再把 ExecStart 改回 8443 + 证书，见下）
+- 发版：Mac `app/release-mac.sh`（签名 Developer ID G2 + 公证 profile omia-notary → `app/dist/*.dmg`）；安卓 `flutter build apk --release`（正式签名钥匙 `~/.luyinka-signing/`，**丢了以后更新装不上，要备份**）；两个文件 rsync 到服务器 `/var/lib/luyinka-cloud/download/`，下载页自动换
+- 实测：真卡 → App 蓝牙自动拉 3.5 分钟录音 → 云端 → 场景 ✅；线上云端 82 秒录音 28 秒整理完；DMG 过 Gatekeeper（Notarized Developer ID）
+- 坑：brew 装的 Flutter 缓存会缺可执行文件（dartaotruntime / impellerc / gen_snapshot），`flutter precache --macos --android --force` 补；App 卡钟按设备时区对（Jane 的 Mac 是洛杉矶时区，跟命令行版的北京时间会互相改卡钟）
+
 ## 给别人用：开箱即用 + 接他自己的 agent（2026-10-18）
 别人拿到这个文件夹（不含 `vendor/`）：
 ```

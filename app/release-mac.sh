@@ -13,7 +13,7 @@ DMG=dist/小耳录音卡-$VER.dmg
 ID=${LUYINKA_SIGN_ID:-DBF88C5EF3B2A16F46817CD7C6938E880928D9D8}
 NOTARY=${LUYINKA_NOTARY_PROFILE:-omia-notary}
 
-echo "== 编译（云端 $CLOUD）"
+echo "== 编译（云端 ${CLOUD}）"
 flutter build macos --release --dart-define=LUYINKA_CLOUD="$CLOUD"
 rm -rf dist && mkdir -p dist
 ditto "$APP" "$OUT"
