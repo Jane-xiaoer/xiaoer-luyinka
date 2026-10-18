@@ -18,8 +18,26 @@ import numpy as np
 ROOT = Path(__file__).resolve().parent.parent
 SENSEVOICE_DIR = Path(os.environ.get(
     "LUYINKA_SENSEVOICE", Path.home() / "projects/RTC/asr_local/official_sensevoice"))
-# 同音纠错：自己的名字/专有词
+# 同音纠错：本地两条 + 小耳语音的纠错表（corrections.txt，「错写 → 正确」，每次转写现读）
 FIXES = {"小尔": "小耳", "小二录音卡": "小耳录音卡"}
+CORRECTIONS = Path(os.environ.get(
+    "LUYINKA_CORRECTIONS", Path.home() / "projects/xiaoer-voice-input/corrections.txt"))
+
+
+def load_fixes() -> dict[str, str]:
+    fixes = dict(FIXES)
+    try:
+        lines = CORRECTIONS.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return fixes
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#") or "→" not in line:
+            continue
+        wrong, right = (x.strip() for x in line.split("→", 1))
+        if wrong and right:
+            fixes[wrong] = right
+    return fixes
 VAD_MODEL = Path(os.environ.get("LUYINKA_VAD", ROOT / "models/silero_vad.onnx"))
 SR = 16000
 WINDOW = 512
@@ -44,6 +62,7 @@ class Transcriber:
             if not p.exists():
                 raise FileNotFoundError(f"缺模型文件: {p}")
         self.so = so
+        self.fixes = load_fixes()
         self.rec = so.OfflineRecognizer.from_sense_voice(
             model=str(model), tokens=str(tokens), use_itn=True, num_threads=threads,
             language=os.environ.get("LUYINKA_LANG", "zh"))
@@ -58,7 +77,7 @@ class Transcriber:
         s.accept_waveform(SR, samples)
         self.rec.decode_stream(s)
         text = _TAG.sub("", s.result.text).strip()
-        for wrong, right in FIXES.items():
+        for wrong, right in self.fixes.items():
             text = text.replace(wrong, right)
         return text
 
