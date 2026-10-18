@@ -36,7 +36,12 @@ class Syncer {
   Timer? _timer;
   void Function()? onChange;
 
-  Syncer(this.store, this.cloud, this.connect, this.scan, this.timezone);
+  Syncer(this.store, this.cloud, this.connect, this.scan, this.timezone) {
+    cloud.onToken = (t) {
+      store.settings['token'] = t;
+      store.save();
+    };
+  }
 
   /// 认准的那张卡（第一次连上就锁定，只在「换一张卡」时改）。
   String? get boundId => store.settings['device'] as String?;

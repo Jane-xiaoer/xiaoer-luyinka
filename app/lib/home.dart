@@ -348,8 +348,8 @@ class _AskBoxState extends State<AskBox> {
     setState(() => _busy = true);
     String answer;
     try {
-      // 先问当天；当天找不到的，模型会说没找到
-      final ctx = [for (final s in widget.scenes) Map<String, dynamic>.from(s.d)..remove('text')];
+      // 问当天：要点 + 逐字稿都给它（云端截到 6 万字）；当天找不到的，模型会说没找到
+      final ctx = [for (final s in widget.scenes) Map<String, dynamic>.from(s.d)];
       answer = await Cloud.instance!.ask(q, ctx);
     } catch (e) {
       answer = '没问成：$e';

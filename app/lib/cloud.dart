@@ -16,6 +16,7 @@ class Cloud {
   String base;
   String? token;
   static Cloud? instance; // App 里只有一个
+  void Function(String token)? onToken; // 重新登记后让 App 存下来
   Cloud(this.base, {this.token}) {
     instance = this;
   }
@@ -31,7 +32,9 @@ class Cloud {
 
   Future<String> register() async {
     final d = await _json(await http.post(Uri.parse('$base/v1/register')));
-    return token = d['token'] as String;
+    token = d['token'] as String;
+    onToken?.call(token!);
+    return token!;
   }
 
   /// 卡上原文件 → 任务 id。
@@ -52,9 +55,16 @@ class Cloud {
   }
 
   Future<String> ask(String question, List<Map<String, dynamic>> scenes) async {
-    final d = await _json(await http.post(Uri.parse('$base/v1/ask'),
+    Future<http.Response> post() => http.post(Uri.parse('$base/v1/ask'),
         headers: {..._auth, 'Content-Type': 'application/json'},
-        body: jsonEncode({'question': question, 'scenes': scenes})));
-    return d['answer'] as String;
+        body: jsonEncode({'question': question, 'scenes': scenes}));
+    if (token == null) await register();
+    var r = await post();
+    if (r.statusCode == 401) {
+      // 云端不认这个登记（换了服务器 / 数据重置）：重新登记再问一次
+      await register();
+      r = await post();
+    }
+    return (await _json(r))['answer'] as String;
   }
 }
