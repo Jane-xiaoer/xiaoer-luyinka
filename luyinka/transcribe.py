@@ -1,44 +1,50 @@
-"""本地转写：silero VAD 切句 + SenseVoice 识别（sherpa-onnx，离线、免费）。
+"""转写：silero VAD 在本机切句 → 每句交给识别引擎。
 
-模型复用 RTC 项目已装好的 SenseVoice int8（~/projects/RTC/asr_local/official_sensevoice/），
-VAD 模型在本项目 models/silero_vad.onnx。
+引擎（config.asr.engine）：
+  local  本机 SenseVoice int8（sherpa-onnx，离线、免费；模型由 `luyinka setup` 下载）
+  cloud  OpenAI 兼容的 /audio/transcriptions（默认硅基流动的 SenseVoiceSmall），只上传切好的一句句音频
 长录音按 30 秒一块流式读 wav，内存占用跟录音长度无关。
 """
 
 from __future__ import annotations
 
+import io
+import json
 import os
 import re
+import urllib.request
+import uuid
 import wave
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 
-ROOT = Path(__file__).resolve().parent.parent
-SENSEVOICE_DIR = Path(os.environ.get(
-    "LUYINKA_SENSEVOICE", Path.home() / "projects/RTC/asr_local/official_sensevoice"))
-# 同音纠错：本地两条 + 小耳语音的纠错表（corrections.txt，「错写 → 正确」，每次转写现读）
-FIXES = {"小尔": "小耳", "小二录音卡": "小耳录音卡"}
-CORRECTIONS = Path(os.environ.get(
-    "LUYINKA_CORRECTIONS", Path.home() / "projects/xiaoer-voice-input/corrections.txt"))
+from .config import C, path
+
+ASR = C["asr"]
+SENSEVOICE_DIR = Path(os.environ.get("LUYINKA_SENSEVOICE", path(ASR["model_dir"])))
+VAD_MODEL = Path(os.environ.get("LUYINKA_VAD", path(ASR["vad_model"])))
 
 
 def load_fixes() -> dict[str, str]:
-    fixes = dict(FIXES)
-    try:
-        lines = CORRECTIONS.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return fixes
-    for line in lines:
-        line = line.strip()
-        if not line or line.startswith("#") or "→" not in line:
+    """同音纠错：配置里内联的 + 纠错表文件（「错写 → 正确」，每次转写现读）。"""
+    fixes = dict(C.get("fixes") or {})
+    for f in C.get("corrections_files") or []:
+        try:
+            lines = path(f).read_text(encoding="utf-8").splitlines()
+        except OSError:
             continue
-        wrong, right = (x.strip() for x in line.split("→", 1))
-        if wrong and right:
-            fixes[wrong] = right
+        for line in lines:
+            line = line.strip()
+            if not line or line.startswith("#") or "→" not in line:
+                continue
+            wrong, right = (x.strip() for x in line.split("→", 1))
+            if wrong and right:
+                fixes[wrong] = right
     return fixes
-VAD_MODEL = Path(os.environ.get("LUYINKA_VAD", ROOT / "models/silero_vad.onnx"))
+
+
 SR = 16000
 WINDOW = 512
 
@@ -56,27 +62,54 @@ class Transcriber:
     def __init__(self, threads: int = 4) -> None:
         import sherpa_onnx as so
 
-        model = SENSEVOICE_DIR / "model.int8.onnx"
-        tokens = SENSEVOICE_DIR / "tokens.txt"
-        for p in (model, tokens, VAD_MODEL):
-            if not p.exists():
-                raise FileNotFoundError(f"缺模型文件: {p}")
         self.so = so
+        self.cloud = ASR["engine"] == "cloud"
+        need = [VAD_MODEL] if self.cloud else [SENSEVOICE_DIR / "model.int8.onnx", SENSEVOICE_DIR / "tokens.txt", VAD_MODEL]
+        for p in need:
+            if not p.exists():
+                raise FileNotFoundError(f"缺模型文件: {p}（跑一次 `luyinka setup` 会自动下载）")
         self.fixes = load_fixes()
-        self.rec = so.OfflineRecognizer.from_sense_voice(
-            model=str(model), tokens=str(tokens), use_itn=True, num_threads=threads,
-            language=os.environ.get("LUYINKA_LANG", "zh"))
+        if not self.cloud:
+            self.rec = so.OfflineRecognizer.from_sense_voice(
+                model=str(SENSEVOICE_DIR / "model.int8.onnx"), tokens=str(SENSEVOICE_DIR / "tokens.txt"),
+                use_itn=True, num_threads=threads, language=os.environ.get("LUYINKA_LANG", ASR.get("language") or "zh"))
         self.vad_cfg = so.VadModelConfig(
             silero_vad=so.SileroVadModelConfig(
                 model=str(VAD_MODEL), threshold=0.5, min_silence_duration=0.5,
                 min_speech_duration=0.25, window_size=WINDOW, max_speech_duration=20),
             sample_rate=SR)
 
-    def _recognize(self, samples: np.ndarray) -> str:
+    def _local(self, samples: np.ndarray) -> str:
         s = self.rec.create_stream()
         s.accept_waveform(SR, samples)
         self.rec.decode_stream(s)
-        text = _TAG.sub("", s.result.text).strip()
+        return s.result.text
+
+    def _cloud(self, samples: np.ndarray) -> str:
+        cfg = ASR["cloud"]
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(SR)
+            w.writeframes((np.clip(samples, -1, 1) * 32767).astype(np.int16).tobytes())
+        b = uuid.uuid4().hex
+        body = (f"--{b}\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\n{cfg['model']}\r\n"
+                f"--{b}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.wav\"\r\n"
+                f"Content-Type: audio/wav\r\n\r\n").encode() + buf.getvalue() + f"\r\n--{b}--\r\n".encode()
+        req = urllib.request.Request(cfg["base_url"].rstrip("/") + "/audio/transcriptions", data=body, headers={
+            "Content-Type": f"multipart/form-data; boundary={b}", "Authorization": "Bearer " + (cfg.get("api_key") or "")})
+        last = None
+        for _ in range(3):
+            try:
+                with urllib.request.urlopen(req, timeout=120) as r:
+                    return json.load(r).get("text") or ""
+            except Exception as e:  # noqa: BLE001 — 网络抖一下再试
+                last = e
+        raise RuntimeError(f"云端转写失败：{last}")
+
+    def _recognize(self, samples: np.ndarray) -> str:
+        text = _TAG.sub("", self._cloud(samples) if self.cloud else self._local(samples)).strip()
         for wrong, right in self.fixes.items():
             text = text.replace(wrong, right)
         return text

@@ -4,8 +4,8 @@
     场景/YYYY-MM-DD/HHMM 标题.md      一个场景一张卡：事件 / 核心观点 / 有价值的 / 值得记住的 / 下一步 / 提醒 / 内容详情
     简报/YYYY-MM-DD.md                当天简报：几点在干嘛、拆出了什么
 
-拆出来的「下一步行动 / 提醒事项」写进小耳灵感的本机收件口 DATA/直连/inbox，
-由它的分拣器按原来的规矩进池子 / 台账 / 提醒 / 飞书；场景本身由执行器推到飞书「录音」表。
+整理完跑配置里的 after_organize：交给用户自己的 agent 按他的规则进他的工作台 / 飞书（docs/给你的agent.md）。
+Jane 自己开了 linggan：「下一步行动 / 提醒事项」写进小耳灵感的本机收件口，场景由它的执行器推飞书「录音」表和日历。
 """
 
 from __future__ import annotations
@@ -15,23 +15,28 @@ import json
 import logging
 import os
 import re
+import shlex
+import subprocess
 import urllib.request
 from pathlib import Path
 
 from . import clock
+from .config import APP_DIR, C, path
 from .pipeline import AUDIO_DIR, HOME, TEXT_DIR
 
 log = logging.getLogger("luyinka")
 
 SCENE_DIR = HOME / "场景"
 BRIEF_DIR = HOME / "简报"
-LINGGAN_DATA = Path(os.environ.get("LUYINKA_LINGGAN_DATA", Path.home() / "Desktop/xiaoer/小耳灵感"))
-LLM_URL = os.environ.get("LUYINKA_LLM_URL", "http://127.0.0.1:11434/v1")
-LLM_MODEL = os.environ.get("LUYINKA_LLM_MODEL", "qwen3.6:35b")
+LINGGAN = C["linggan"]
+LINGGAN_DATA = Path(os.environ.get("LUYINKA_LINGGAN_DATA", path(LINGGAN["data_dir"])))
+LLM = C["llm"]
+LLM_URL = os.environ.get("LUYINKA_LLM_URL", LLM["base_url"])
+LLM_MODEL = os.environ.get("LUYINKA_LLM_MODEL", LLM["model"])
 WINDOW_CHARS = 6000   # 一次喂给模型的转写长度（约 15 分钟连续说话）
 
 SYSTEM = """/no_think
-你在帮小耳整理她的录音卡录下的一段录音转写。录音卡别在她身上，录的是她一天里的聊天、开会、打电话、自言自语。
+你在帮{owner}整理录音卡录下的一段录音转写。录音卡别在TA身上，录的是TA一天里的聊天、开会、打电话、自言自语。
 转写没有区分谁在说话，会有错字（人名、品牌名尤其多），按上下文理解就行。每行开头是钟点。
 
 按话题把它切成「场景」：同一段时间在聊同一件事算一个场景；话题换了、或者中间停了很久，就切开。
@@ -41,7 +46,7 @@ SYSTEM = """/no_think
 - start / end：从行首钟点里原样抄（HH:MM:SS）
 - category：只能从这里选一个：{cats}
 - title：4–16 字，说清在干嘛
-- event：一句话说这段发生了什么，20–60 字，只陈述不评价，不要以「她 / 用户 / 我」开头
+- event：一句话说这段发生了什么，20–60 字，只陈述不评价，不要以「TA / 用户 / 我」开头
 - place：录音里明确说到的地点；没说就留空，别猜
 - people：在场或提到的人名，原样写；不是具体的人别写
 - views：核心观点 0–3 条：这段里谁提出了什么看法、判断（写清是谁的观点，说不清就不写谁）
@@ -56,8 +61,10 @@ SYSTEM = """/no_think
 只输出 JSON，不要别的字：
 {"scenes":[{"start":"","end":"","category":"","title":"","event":"","place":"","people":[],"views":[],"valuable":[],"memorable":[{"t":"","text":""}],"actions":[{"t":"","text":"","who":""}],"reminders":[{"t":"","text":"","when":""}]}]}"""
 
-CATEGORIES = ["嘉宾分享", "商业洽谈", "与人对话", "开会", "学习听课", "打电话", "自言自语", "生活日常", "杂音"]
-SYSTEM = SYSTEM.replace("{cats}", " / ".join(CATEGORIES) + "（杂音 = 没有能用的内容：电视声、环境声、听不清）")
+CATEGORIES = list(C["categories"])
+NOISE = "杂音"   # 这一类不进简报、不送出去
+FALLBACK = "与人对话" if "与人对话" in CATEGORIES else next((c for c in CATEGORIES if c != NOISE), "其他")
+SYSTEM = SYSTEM.replace("{owner}", C.get("owner") or "主人").replace("{cats}", " / ".join(CATEGORIES) + "（杂音 = 没有能用的内容：电视声、环境声、听不清）")
 
 _LINE = re.compile(r"^\*\*\[(\d+):(\d\d):(\d\d)\]\*\*\s*(.*)$")
 _NAME = re.compile(r"(\d{4})-(\d\d)-(\d\d) (\d\d)\.(\d\d)\.(\d\d)")
@@ -106,7 +113,8 @@ def call_llm(user: str, timeout: int = 900) -> str:
     body = {"model": LLM_MODEL, "temperature": 0.2,
             "messages": [{"role": "system", "content": SYSTEM}, {"role": "user", "content": user}]}
     req = urllib.request.Request(LLM_URL.rstrip("/") + "/chat/completions", data=json.dumps(body).encode(),
-                                 headers={"Content-Type": "application/json", "Authorization": "Bearer x"})
+                                 headers={"Content-Type": "application/json",
+                                          "Authorization": "Bearer " + (LLM.get("api_key") or "x")})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.load(r)["choices"][0]["message"]["content"]
 
@@ -163,7 +171,7 @@ def cut(md: Path, call=call_llm) -> list[dict]:
             "id": f"{start:%Y%m%d-%H%M%S}-lyk",
             "recording": md.stem, "audio": str(AUDIO_DIR / f"{md.stem}.ogg"), "offset": s["_a"],
             "start": start.isoformat(timespec="seconds"), "end": end.isoformat(timespec="seconds"),
-            "category": cat if (cat := str(s.get("category") or "")) in CATEGORIES else "与人对话",
+            "category": cat if (cat := str(s.get("category") or "")) in CATEGORIES else FALLBACK,
             "title": str(s.get("title") or "")[:30], "event": str(s.get("event") or ""),
             "place": str(s.get("place") or ""), "people": _strs(s.get("people")),
             "views": _strs(s.get("views")), "valuable": _strs(s.get("valuable")),
@@ -233,7 +241,7 @@ def scene_md(sc: dict) -> str:
 
 
 def brief_md(day: str, scenes: list[dict]) -> str:
-    real = [s for s in scenes if s["category"] != "杂音"]
+    real = [s for s in scenes if s["category"] != NOISE]
     todo = [(s, x) for s in real for x in todo_of(s)]
     people = sorted({p for s in real for p in s["people"]})
     lines = [f"# 录音简报 · {day}", "",
@@ -288,8 +296,30 @@ def enqueue_feishu(day: str) -> None:
                             ensure_ascii=False), encoding="utf-8")
 
 
+def run_hook(day: str) -> None:
+    """整理完一天：跑用户配的命令，交给他自己的 agent 按他的规则处理（失败只记日志，不影响整理）。"""
+    cmd = (C.get("after_organize") or "").strip()
+    if not cmd:
+        return
+    folder = SCENE_DIR / day
+    env = dict(os.environ, LUYINKA_DAY=day, LUYINKA_DAY_DIR=str(folder),
+               LUYINKA_SCENES_JSON=str(folder / "scenes.json"), LUYINKA_BRIEF=str(BRIEF_DIR / f"{day}.md"))
+    cmd = cmd.format(day=day, day_dir=shlex.quote(str(folder)), scenes_json=shlex.quote(str(folder / "scenes.json")),
+                     brief=shlex.quote(str(BRIEF_DIR / f"{day}.md")))
+    log.info("交给你的 agent：%s", cmd)
+    logf = APP_DIR / "logs" / "agent.log"
+    logf.parent.mkdir(parents=True, exist_ok=True)
+    with open(logf, "a", encoding="utf-8") as out:
+        out.write(f"\n===== {clock.now():%Y-%m-%d %H:%M:%S} {day} =====\n$ {cmd}\n")
+        out.flush()
+        r = subprocess.run(cmd, shell=True, env=env, stdout=out, stderr=subprocess.STDOUT, cwd=str(folder), timeout=3600)
+    if r.returncode:
+        log.warning("agent 命令退出码 %s，详情看 %s", r.returncode, logf)
+
+
 def organize(day: str, push: bool = True, call=call_llm) -> dict:
-    """整理某一天：只切还没切过的录音，已有的场景和已送出的条目不动。"""
+    """整理某一天：只切还没切过的录音，已有的场景和已送出的条目不动。
+    push：送小耳灵感 / 推飞书（只在 linggan.enabled 时）+ 跑 after_organize 钩子。"""
     folder = SCENE_DIR / day
     index = folder / "scenes.json"
     db = json.loads(index.read_text(encoding="utf-8")) if index.exists() else {"day": day, "recordings": [], "scenes": []}
@@ -306,15 +336,18 @@ def organize(day: str, push: bool = True, call=call_llm) -> dict:
         new += len(scenes)
     db["scenes"].sort(key=lambda s: s["start"])
     folder.mkdir(parents=True, exist_ok=True)
+    linggan = push and LINGGAN.get("enabled")
     for sc in db["scenes"]:
         Path(sc["card"]).write_text(scene_md(sc), encoding="utf-8")
-        if push and sc["category"] != "杂音":
+        if linggan and sc["category"] != NOISE:
             sc["capture"] = push_to_linggan(sc)
     index.write_text(json.dumps(db, ensure_ascii=False, indent=1), encoding="utf-8")
     BRIEF_DIR.mkdir(parents=True, exist_ok=True)
     (BRIEF_DIR / f"{day}.md").write_text(brief_md(day, db["scenes"]), encoding="utf-8")
     if push and new:
-        enqueue_feishu(day)
+        if linggan:
+            enqueue_feishu(day)
+        run_hook(day)
     return {"day": day, "new": new, "scenes": len(db["scenes"]),
             "todo": sum(len(todo_of(s)) for s in db["scenes"]), "brief": str(BRIEF_DIR / f"{day}.md")}
 

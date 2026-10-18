@@ -1,6 +1,19 @@
-# 小耳录音卡（自用长时录音卡，Mac 本地转写）
+# 小耳录音卡（长时录音卡 → 转写 → 场景 → 你的 agent）
 
 目标：出门磁吸手机录音，回家 Mac 自动拉文件 + 本地转写（SenseVoice / mlx-whisper），不交飞书 68 元/月。
+
+## 给别人用：开箱即用 + 接他自己的 agent（2026-10-18）
+别人拿到这个文件夹（不含 `vendor/`）：
+```
+./install.sh        # 装好环境和 luyinka 命令，接着进设置向导（7 步，回车用默认）
+```
+向导：产出文件夹 → 时区 → 转写（本机 SenseVoice 自动下 230MB / 云端 OpenAI 兼容接口，默认硅基流动）→ 整理用的大模型（任何 OpenAI 兼容：DeepSeek / 通义 / 本地 ollama，填完当场试一下）→ 接他的 agent（Claude Code / Codex / 自己写命令，生成 `~/.luyinka/整理规则.md` 让他改）+ 一键接 MCP → 找卡 → 开自动拉（launchd 每 30 分钟）
+- 配置 `~/.luyinka/config.json`（`luyinka/config.py` 有全部默认值），进度 `~/.luyinka/state.json`，日志 `~/.luyinka/logs/`
+- 每天整理完跑 `after_organize`：把 `{day} {scenes_json} {day_dir} {brief}` 交给他的 agent，按他的规则进他的工作台 / 飞书 / Notion
+- agent 取数据：`luyinka days|day|scene|search --json`，或 MCP `luyinka mcp`（list_days / get_day / get_scene / search / pull）
+- 写给 agent 的接入说明：`docs/给你的agent.md`（数据格式 + 飞书 / Notion / 本地笔记接法），丢给他的 agent 就行
+- 实测（2026-10-18）：模拟全新用户目录从 install.sh 装到 setup 走完、整理、钩子触发；真 Claude Code 按规则把场景写进工作台 35 秒
+- Jane 自己的配置额外开了 `linggan.enabled`（小耳灵感 + 飞书录音表 + 日历），别人默认关
 
 ## 硬件（2026-10-14 选定，待下单）
 - 淘宝「华天电子用品店」开源录音卡，选 **蓝牙版 239 元**（主控 惠联 W20；Wi-Fi+蓝牙版 409 元，主控 杰理 AC7911）

@@ -1,0 +1,16 @@
+[project]
+name = "luyinka"
+version = "0.1.0"
+description = "录音卡：蓝牙拉录音 → 转写 → 切场景 → 交给你自己的 agent 进工作台"
+requires-python = ">=3.10"
+dependencies = ["bleak>=0.22", "numpy>=1.26", "sherpa-onnx>=1.10", "mcp>=2.0"]
+
+[project.scripts]
+luyinka = "luyinka.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["luyinka"]

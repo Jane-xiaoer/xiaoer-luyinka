@@ -38,7 +38,8 @@ def home(tmp_path, monkeypatch):
     (linggan / "直连" / "inbox").mkdir(parents=True)
     (linggan / "动作" / "待办").mkdir(parents=True)
     for k, v in {"TEXT_DIR": text, "AUDIO_DIR": tmp_path / "音频", "SCENE_DIR": tmp_path / "场景",
-                 "BRIEF_DIR": tmp_path / "简报", "LINGGAN_DATA": linggan}.items():
+                 "BRIEF_DIR": tmp_path / "简报", "LINGGAN_DATA": linggan,
+                 "LINGGAN": {"enabled": True}}.items():
         monkeypatch.setattr(S, k, v)
     return tmp_path
 
@@ -68,3 +69,17 @@ def test_organize_pushes_once_and_skips_noise(home):
     r2 = S.organize("2026-10-18", call=lambda u: pytest.fail("不该再调模型"))
     assert r2["new"] == 0
     assert len(list((home / "灵感" / "直连" / "inbox").iterdir())) == 1
+
+
+def test_hook_runs_with_day_vars(home, monkeypatch):
+    monkeypatch.setattr(S, "APP_DIR", home / "app")
+    monkeypatch.setitem(S.C, "after_organize", "echo $LUYINKA_DAY {day} > " + str(home / "hook.txt"))
+    S.organize("2026-10-18", call=fake_llm)
+    assert (home / "hook.txt").read_text().split() == ["2026-10-18", "2026-10-18"]
+
+
+def test_no_linggan_no_push(home, monkeypatch):
+    monkeypatch.setattr(S, "LINGGAN", {"enabled": False})
+    S.organize("2026-10-18", call=fake_llm)
+    assert not list((home / "灵感" / "直连" / "inbox").iterdir())
+    assert not list((home / "灵感" / "动作" / "待办").iterdir())

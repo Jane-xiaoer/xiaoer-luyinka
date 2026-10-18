@@ -1,6 +1,6 @@
 """整条流水线：卡上新录音 → 下载（断点续传）→ 封装 ogg → 转写 md →（可选）删卡上文件。
 
-产出目录（默认 ~/Desktop/works/小耳录音卡/，可用 LUYINKA_HOME 改）：
+产出目录（配置里的 home，LUYINKA_HOME 可临时改）：
     原始/   卡上导出的裸 Opus（.opus，下载中是 .opus.part）
     音频/   能直接播放的 .ogg
     文字/   转写结果 .md
@@ -19,16 +19,17 @@ import time
 from pathlib import Path
 
 from . import opus_ogg
+from .config import APP_DIR, C, path
 from .device import Client, DeviceError, TransferStalled
 from .protocol import RemoteFile
 
 log = logging.getLogger("luyinka")
 
-HOME = Path(os.environ.get("LUYINKA_HOME", Path.home() / "Desktop/works/小耳录音卡"))
+HOME = Path(os.environ.get("LUYINKA_HOME", path(C["home"])))
 RAW_DIR = HOME / "原始"
 AUDIO_DIR = HOME / "音频"
 TEXT_DIR = HOME / "文字"
-STATE = Path(__file__).resolve().parent.parent / "state.json"
+STATE = APP_DIR / "state.json"
 
 
 def load_state() -> dict:
@@ -38,6 +39,7 @@ def load_state() -> dict:
 
 
 def save_state(st: dict) -> None:
+    STATE.parent.mkdir(parents=True, exist_ok=True)
     tmp = STATE.with_suffix(".tmp")
     tmp.write_text(json.dumps(st, ensure_ascii=False, indent=2))
     tmp.replace(STATE)
