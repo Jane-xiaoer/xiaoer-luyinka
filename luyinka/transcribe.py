@@ -18,6 +18,8 @@ import numpy as np
 ROOT = Path(__file__).resolve().parent.parent
 SENSEVOICE_DIR = Path(os.environ.get(
     "LUYINKA_SENSEVOICE", Path.home() / "projects/RTC/asr_local/official_sensevoice"))
+# 同音纠错：自己的名字/专有词
+FIXES = {"小尔": "小耳", "小二录音卡": "小耳录音卡"}
 VAD_MODEL = Path(os.environ.get("LUYINKA_VAD", ROOT / "models/silero_vad.onnx"))
 SR = 16000
 WINDOW = 512
@@ -43,7 +45,8 @@ class Transcriber:
                 raise FileNotFoundError(f"缺模型文件: {p}")
         self.so = so
         self.rec = so.OfflineRecognizer.from_sense_voice(
-            model=str(model), tokens=str(tokens), use_itn=True, num_threads=threads)
+            model=str(model), tokens=str(tokens), use_itn=True, num_threads=threads,
+            language=os.environ.get("LUYINKA_LANG", "zh"))
         self.vad_cfg = so.VadModelConfig(
             silero_vad=so.SileroVadModelConfig(
                 model=str(VAD_MODEL), threshold=0.5, min_silence_duration=0.5,
@@ -54,7 +57,10 @@ class Transcriber:
         s = self.rec.create_stream()
         s.accept_waveform(SR, samples)
         self.rec.decode_stream(s)
-        return _TAG.sub("", s.result.text).strip()
+        text = _TAG.sub("", s.result.text).strip()
+        for wrong, right in FIXES.items():
+            text = text.replace(wrong, right)
+        return text
 
     def segments(self, wav_path: Path, progress=None):
         vad = self.so.VoiceActivityDetector(self.vad_cfg, buffer_size_in_seconds=120)
