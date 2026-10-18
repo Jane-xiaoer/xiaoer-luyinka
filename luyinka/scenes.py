@@ -57,6 +57,7 @@ SYSTEM = """/no_think
 没有的项给空数组 / 空字符串。闲聊、情绪、重复的话不进 views / valuable / actions。
 
 铁律：不编。转写里没有的不写，推断的不写。
+转写常把相邻数字粘在一起（「11月12月」可能是「11月、12月」，「1112」可能是「11、12」）：日期、数字拿不准就照原话抄，别自己换算成具体日子。
 
 只输出 JSON，不要别的字：
 {"scenes":[{"start":"","end":"","category":"","title":"","event":"","place":"","people":[],"views":[],"valuable":[],"memorable":[{"t":"","text":""}],"actions":[{"t":"","text":"","who":""}],"reminders":[{"t":"","text":"","when":""}]}]}"""

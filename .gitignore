@@ -3,3 +3,5 @@ state.json
 __pycache__/
 *.tmp
 vendor/raw/
+app/build/
+app/.dart_tool/
