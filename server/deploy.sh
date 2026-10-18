@@ -46,7 +46,7 @@ WorkingDirectory=/opt/luyinka-cloud
 Environment=LUYINKA_CONFIG=/opt/luyinka-cloud/server.json
 Environment=LUYINKA_CLOUD_DATA=/var/lib/luyinka-cloud
 Environment=LUYINKA_APP_DIR=/var/lib/luyinka-cloud/app
-ExecStart=/opt/luyinka-cloud/venv/bin/python -m server.app --host 127.0.0.1 --port 8790
+ExecStart=/opt/luyinka-cloud/venv/bin/python -m server.app $(T=/var/lib/luyinka-cloud/tls; [ -f $T/fullchain.pem ] && echo "--host 0.0.0.0 --port 8443 --tls-cert $T/fullchain.pem --tls-key $T/key.pem" || echo "--host 127.0.0.1 --port 8790")
 Restart=always
 RestartSec=5
 MemoryMax=2500M
@@ -54,6 +54,6 @@ MemoryMax=2500M
 [Install]
 WantedBy=multi-user.target
 EOF
-sudo systemctl daemon-reload && sudo systemctl enable luyinka-cloud && sudo systemctl restart luyinka-cloud && sleep 3 && curl -s 127.0.0.1:8790/healthz'
+sudo systemctl daemon-reload && sudo systemctl enable luyinka-cloud && sudo systemctl restart luyinka-cloud && sleep 3 && (curl -sk https://127.0.0.1:8443/healthz || curl -s 127.0.0.1:8790/healthz)'
 echo
-echo "✅ 云端装好了（服务器本机 127.0.0.1:8790）"
+echo "✅ 云端装好了（有证书就是 https 8443，没有就是本机 127.0.0.1:8790）"
