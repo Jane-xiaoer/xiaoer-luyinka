@@ -139,7 +139,7 @@ class _Dest extends StatelessWidget {
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: const BorderSide(color: K.line)),
           child: ListTile(
             minTileHeight: 60,
-            leading: Icon(icon, color: K.green),
+            leading: Icon(icon, color: K.accent),
             title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
             subtitle: Text(sub, style: const TextStyle(color: K.mute, fontSize: 13)),
             onTap: onTap,

@@ -89,18 +89,28 @@ class _HomeState extends State<Home> {
 
   Widget _wide() => Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         SizedBox(width: 228, child: Sidebar(store: store, syncer: widget.syncer, day: day, onPick: pickDay)),
-        const VerticalDivider(width: 1),
+        Expanded(child: Container(
+          margin: const EdgeInsets.fromLTRB(0, 12, 12, 12),
+          clipBehavior: Clip.antiAlias,
+          decoration: BoxDecoration(
+            color: K.card,
+            borderRadius: BorderRadius.circular(22),
+            boxShadow: const [BoxShadow(color: Color(0x261F4A44), blurRadius: 24, offset: Offset(0, 8))],
+          ),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         SizedBox(
           width: (MediaQuery.sizeOf(context).width * 0.36).clamp(360, 470).toDouble(),
           child: DayColumn(
               store: store, day: day, scenes: scenes, selected: scene?.id, onHandoff: _handoff,
               onPick: (s) => setState(() => _sceneId = s.id)),
         ),
-        const VerticalDivider(width: 1),
+        const VerticalDivider(width: 1, color: K.line),
         Expanded(
             child: scene == null
                 ? const Hint('sleep', '还没有内容', '有录音以后，点左边任意一段，这里看要点和逐字稿。')
-                : SceneDetail(scene: scene!, player: player, store: store, top: 44)),
+                : SceneDetail(scene: scene!, player: player, store: store, top: 36)),
+          ]),
+        )),
       ]);
 
   Widget _narrow() => Column(children: [
@@ -203,7 +213,7 @@ class HandoffButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) => FilledButton.icon(
         style: FilledButton.styleFrom(
-            backgroundColor: K.green, foregroundColor: Colors.white, minimumSize: Size(0, compact ? 34 : 38),
+            backgroundColor: K.ink, foregroundColor: K.card, minimumSize: Size(0, compact ? 34 : 38),
             padding: EdgeInsets.symmetric(horizontal: compact ? 12 : 16)),
         onPressed: onPressed,
         icon: const Icon(Icons.arrow_forward, size: 16),
@@ -230,12 +240,12 @@ class Sidebar extends StatelessWidget {
             child: Row(children: [
               const Mascot('stand', size: 38, halo: true),
               const SizedBox(width: 10),
-              Text('小耳录音卡', style: K.title(18)),
+              Text('小耳录音卡', style: K.title(18).copyWith(color: K.ink)),
             ]),
           ),
           const Padding(
             padding: EdgeInsets.fromLTRB(22, 0, 16, 6),
-            child: Text('每天', style: TextStyle(fontSize: 12, color: K.faint, fontWeight: FontWeight.w600, letterSpacing: 1)),
+            child: Text('每 天', style: TextStyle(fontSize: 12, color: K.mute, fontWeight: FontWeight.w700, letterSpacing: 3)),
           ),
           Expanded(child: DayNav(store: store, day: day, onPick: onPick)),
           CardPanel(syncer: syncer, store: store),
@@ -255,7 +265,7 @@ class DayNav extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(bottom: 2),
             child: Material(
-              color: e.key == day ? K.greenSoft : Colors.transparent,
+              color: e.key == day ? K.card : Colors.transparent,
               borderRadius: BorderRadius.circular(10),
               child: InkWell(
                 borderRadius: BorderRadius.circular(10),
@@ -267,9 +277,9 @@ class DayNav extends StatelessWidget {
                         child: Text(dayTitle(e.key, short: true),
                             style: TextStyle(
                                 fontWeight: e.key == day ? FontWeight.w600 : FontWeight.w400,
-                                color: e.key == day ? K.green : K.mute))),
+                                color: e.key == day ? K.ink : K.mute))),
                     Text('${e.value.length}',
-                        style: TextStyle(fontSize: 12, color: e.key == day ? K.green : K.faint,
+                        style: TextStyle(fontSize: 12, color: e.key == day ? K.accent : K.faint,
                             fontWeight: FontWeight.w600)),
                   ]),
                 ),
@@ -301,7 +311,7 @@ class CardPanel extends StatelessWidget {
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Row(children: [
                 Container(width: 7, height: 7,
-                    decoration: BoxDecoration(color: live ? K.greenLive : K.line, shape: BoxShape.circle)),
+                    decoration: BoxDecoration(color: live ? K.live : K.line, shape: BoxShape.circle)),
                 const SizedBox(width: 6),
                 Flexible(child: Text(title, overflow: TextOverflow.ellipsis,
                     style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600))),
@@ -315,7 +325,7 @@ class CardPanel extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(top: 8, right: 4),
             child: FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: K.green, minimumSize: const Size(0, 34)),
+              style: FilledButton.styleFrom(backgroundColor: K.accent, minimumSize: const Size(0, 34)),
               onPressed: () => showCardPicker(context, syncer),
               child: const Text('选你的卡'),
             ),
@@ -360,12 +370,14 @@ class DayColumn extends StatelessWidget {
     final todo = scenes.fold<int>(0, (a, s) => a + s.todo);
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       Padding(
-        padding: EdgeInsets.fromLTRB(24, onHandoff != null ? 44 : 20, 20, 12),
+        padding: EdgeInsets.fromLTRB(24, onHandoff != null ? 34 : 20, 20, 12),
         child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(dayTitle(day!), style: K.title(26)),
-              const SizedBox(height: 6),
+              Text(dayTitle(day!), style: K.title(26).copyWith(color: K.ink)),
+              const SizedBox(height: 2),
+              const Squiggle(width: 132),
+              const SizedBox(height: 10),
               Wrap(spacing: 6, runSpacing: 6, children: [
                 _Stat(Icons.mic_none, '录了 ${duration(total)}'),
                 _Stat(Icons.view_agenda_outlined, '${scenes.length} 个场景'),
@@ -396,11 +408,11 @@ class SceneRow extends StatelessWidget {
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.only(bottom: 8),
         child: Material(
-          color: selected ? K.card : Colors.transparent,
-          elevation: selected ? 0.6 : 0,
+          color: selected ? K.cardDeep : Colors.transparent,
+          elevation: 0,
           shadowColor: const Color(0x22000000),
           shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(14), side: BorderSide(color: selected ? K.greenEdge : Colors.transparent)),
+              borderRadius: BorderRadius.circular(14), side: BorderSide(color: selected ? K.accentEdge : Colors.transparent)),
           child: InkWell(
             borderRadius: BorderRadius.circular(14),
             hoverColor: const Color(0x0A000000),
@@ -411,7 +423,7 @@ class SceneRow extends StatelessWidget {
                 SizedBox(
                     width: 52,
                     child: Text(hm(scene.start),
-                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: selected ? K.green : K.faint,
+                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: selected ? K.accent : K.faint,
                             fontFeatures: const [FontFeature.tabularFigures()]))),
                 Expanded(
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -441,7 +453,7 @@ class _Stat extends StatelessWidget {
   Widget build(BuildContext context) => Container(
         padding: const EdgeInsets.fromLTRB(8, 3, 10, 3),
         decoration: BoxDecoration(
-            color: todo ? K.todoSoft : K.card, borderRadius: BorderRadius.circular(99),
+            color: todo ? K.todoSoft : K.cardDeep, borderRadius: BorderRadius.circular(99),
             border: Border.all(color: todo ? K.todoSoft : K.line)),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           Icon(icon, size: 14, color: todo ? K.todo : K.faint),
@@ -531,7 +543,7 @@ class _AskBoxState extends State<AskBox> {
             ),
           ),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: K.green, minimumSize: const Size(56, 40)),
+            style: FilledButton.styleFrom(backgroundColor: K.accent, minimumSize: const Size(56, 40)),
             onPressed: _busy ? null : _ask,
             child: _busy
                 ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
@@ -564,15 +576,10 @@ class SceneDetail extends StatelessWidget {
   void _play(String clock) => player.play(store, scene.stem, _offsetOf(clock), clock);
 
   Widget _box(String head, IconData icon, Color color, List<Widget> lines, {Color? bg}) => Container(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
-        decoration: BoxDecoration(
-            color: bg ?? K.card, borderRadius: BorderRadius.circular(14), border: Border.all(color: K.line)),
+        padding: const EdgeInsets.fromLTRB(18, 16, 18, 12),
+        decoration: BoxDecoration(color: bg ?? K.cardDeep, borderRadius: BorderRadius.circular(16)),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            Icon(icon, size: 16, color: color),
-            const SizedBox(width: 6),
-            Text(head, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: color)),
-          ]),
+          Label(head, color: color),
           const SizedBox(height: 8),
           ...lines,
         ]),
@@ -591,7 +598,7 @@ class SceneDetail extends StatelessWidget {
 
   Widget _ts(String clock) => InkWell(
         onTap: () => _play(clock),
-        child: Text(clock.substring(0, 5), style: const TextStyle(color: K.green, fontFeatures: [FontFeature.tabularFigures()])),
+        child: Text(clock.substring(0, 5), style: const TextStyle(color: K.accent, fontFeatures: [FontFeature.tabularFigures()])),
       );
 
   @override
@@ -615,15 +622,17 @@ class SceneDetail extends StatelessWidget {
         if (s.people.isNotEmpty) meta(Icons.people_outline, s.people.join('、')),
       ]),
       const SizedBox(height: 10),
-      SelectableText(s.title, style: K.title(26)),
+      SelectableText(s.title, style: K.title(26).copyWith(color: K.ink)),
+      const SizedBox(height: 2),
+      const Squiggle(width: 96),
       const SizedBox(height: 8),
       SelectableText(s.event, style: const TextStyle(fontSize: 15, height: 1.7)),
       const SizedBox(height: 16),
       LayoutBuilder(builder: (_, c) {
         final boxes = [
           if (s.valuable.isNotEmpty || s.views.isNotEmpty)
-            _box('有价值的内容', Icons.auto_awesome_outlined, K.green,
-                [for (final x in [...s.views, ...s.valuable]) _point(x, K.greenLive)]),
+            _box('有价值的内容', Icons.auto_awesome_outlined, K.ink,
+                [for (final x in [...s.views, ...s.valuable]) _point(x, K.accent)]),
           if (todo.isNotEmpty)
             _box('下一步 / 提醒', Icons.check_circle_outline, K.todo, [for (final x in todo) _point(x, K.todo)],
                 bg: K.todoBg),
@@ -642,7 +651,7 @@ class SceneDetail extends StatelessWidget {
       }),
       if (s.memorable.isNotEmpty) ...[
         const SizedBox(height: 12),
-        _box('值得记住的', Icons.format_quote, K.green, [
+        _box('值得记住的', Icons.format_quote, K.ink, [
           for (final m in s.memorable)
             Padding(
               padding: const EdgeInsets.only(bottom: 4),
@@ -655,10 +664,8 @@ class SceneDetail extends StatelessWidget {
       ],
       const SizedBox(height: 18),
       const Row(children: [
-        Icon(Icons.notes, size: 16, color: K.green),
-        SizedBox(width: 6),
-        Text('逐字稿', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: K.green)),
-        SizedBox(width: 8),
+        Label('逐字稿'),
+        SizedBox(width: 10),
         Text('点时间从那里听', style: TextStyle(fontSize: 12, color: K.faint)),
       ]),
       const SizedBox(height: 8),
@@ -670,7 +677,7 @@ class SceneDetail extends StatelessWidget {
               margin: const EdgeInsets.only(bottom: 6),
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
               decoration: BoxDecoration(
-                  color: player.stem == s.stem && player.label == line[0] ? K.greenSoft : Colors.transparent,
+                  color: player.stem == s.stem && player.label == line[0] ? K.accentSoft : Colors.transparent,
                   borderRadius: BorderRadius.circular(6)),
               child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 _ts(line[0]),
@@ -745,7 +752,7 @@ class PlayerBar extends StatelessWidget {
           decoration: const BoxDecoration(color: K.bar, border: Border(top: BorderSide(color: K.line))),
           child: Row(children: [
             IconButton.filled(
-              style: IconButton.styleFrom(backgroundColor: K.green),
+              style: IconButton.styleFrom(backgroundColor: K.ink),
               tooltip: player.playing ? '暂停' : '播放',
               onPressed: player.toggle,
               icon: Icon(player.playing ? Icons.pause : Icons.play_arrow, color: Colors.white),
@@ -754,7 +761,7 @@ class PlayerBar extends StatelessWidget {
             Text(_t(player.pos), style: const TextStyle(fontSize: 13, color: K.mute)),
             Expanded(
               child: Slider(
-                activeColor: K.green,
+                activeColor: K.accent,
                 inactiveColor: K.lineStrong,
                 value: player.total.inMilliseconds == 0
                     ? 0

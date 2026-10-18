@@ -1,24 +1,28 @@
 // 小耳系列：暖纸底、品牌绿、深墨字；标题用宋体，正文用系统黑体（Mac 苹方 / 安卓思源黑体）。
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 
 class K {
-  // 配色照小耳 IP 参考图：奶油底、象牙白卡片、嫩芽黄绿、四叶草绿、腮红桃色、暖棕墨字
-  static const paper = Color(0xFFF5F0E6); // 奶油底
-  static const bar = Color(0xFFEEE7D9); // 左栏 / 底栏，比底色深一点
-  static const card = Color(0xFFFDFBF6); // 象牙白
-  static const line = Color(0xFFE6DECD);
-  static const lineStrong = Color(0xFFD9CFBA);
-  static const ink = Color(0xFF34302A); // 暖棕墨
-  static const mute = Color(0xFF6B6558);
-  static const faint = Color(0xFF8E8778);
-  static const green = Color(0xFF5E9B2E); // 四叶草绿：标题强调、时间、按钮
-  static const greenLive = Color(0xFF8CC63F); // 亮一点的绿：在线小圆点、要点圆点
-  static const greenSoft = Color(0xFFEDF3D3); // 嫩芽黄绿浅底：选中、标签
-  static const greenEdge = Color(0xFFD5E6A0); // 嫩芽黄绿描边
-  static const lime = Color(0xFFCFE38A); // 嫩芽色：装饰底
-  static const todo = Color(0xFFB0603A); // 腮红桃色系：要办的事
-  static const todoSoft = Color(0xFFFBE7DC);
-  static const todoBg = Color(0xFFFDF4EE);
+  // 配色照 Paperless Post 请柬：鼠尾草绿底、米白纸卡片、深青墨字、珊瑚粉手绘点缀
+  static const sage = Color(0xFFC9D6C3); // 窗口底：鼠尾草绿
+  static const paper = sage;
+  static const bar = sage; // 左栏、播放条直接落在绿底上
+  static const card = Color(0xFFF8F3E8); // 米白纸
+  static const cardDeep = Color(0xFFF1EADB); // 纸上的小格子
+  static const line = Color(0xFFE6DCC8);
+  static const lineStrong = Color(0xFFD5C9B1);
+  static const ink = Color(0xFF1F4A44); // 深青墨：正文、标题
+  static const mute = Color(0xFF4F6A64);
+  static const faint = Color(0xFF7F928C);
+  static const accent = Color(0xFFD95E54); // 珊瑚粉：时间、强调、按钮
+  static const accentSoft = Color(0xFFF9E1DC); // 信封粉：选中、标签底
+  static const accentEdge = Color(0xFFEFB8AF);
+  static const blush = Color(0xFFF3D2CE);
+  static const live = Color(0xFF4F9A68); // 在线小圆点
+  static const todo = Color(0xFF8F6514); // 要办的事：奶黄
+  static const todoSoft = Color(0xFFF5E6C2);
+  static const todoBg = Color(0xFFFBF4E2);
   static const sans = ['PingFang SC', 'Noto Sans CJK SC', 'Noto Sans SC', 'sans-serif'];
   static const serif = ['Songti SC', 'Noto Serif CJK SC', 'Noto Serif SC', 'serif'];
 
@@ -29,7 +33,7 @@ class K {
 ThemeData buildTheme() {
   final base = ThemeData(
     useMaterial3: true,
-    colorScheme: ColorScheme.fromSeed(seedColor: K.green, surface: K.paper, primary: K.green),
+    colorScheme: ColorScheme.fromSeed(seedColor: K.accent, surface: K.paper, primary: K.accent),
     scaffoldBackgroundColor: K.paper,
     fontFamilyFallback: K.sans,
     dividerColor: K.line,
@@ -44,7 +48,7 @@ ThemeData buildTheme() {
 class Mascot extends StatelessWidget {
   final String pose;
   final double size;
-  final bool halo; // 身后垫一个嫩芽色圆（照参考图）
+  final bool halo; // 身后垫一个信封粉的圆
   const Mascot(this.pose, {super.key, this.size = 40, this.halo = false});
   @override
   Widget build(BuildContext context) {
@@ -59,7 +63,7 @@ class Mascot extends StatelessWidget {
           top: size * 0.02,
           child: Container(
               width: size * 0.78, height: size * 0.78,
-              decoration: BoxDecoration(color: K.lime.withValues(alpha: 0.55), shape: BoxShape.circle)),
+              decoration: const BoxDecoration(color: K.blush, shape: BoxShape.circle)),
         ),
         Positioned(left: 0, bottom: 0, child: img),
       ]),
@@ -67,15 +71,90 @@ class Mascot extends StatelessWidget {
   }
 }
 
+/// 珊瑚粉手绘波浪线（请柬边上那种丝带），放在标题下面。
+class Squiggle extends StatelessWidget {
+  final double width;
+  const Squiggle({super.key, this.width = 120});
+  @override
+  Widget build(BuildContext context) =>
+      Align(alignment: Alignment.centerLeft, child: CustomPaint(size: Size(width, 12), painter: _SquigglePainter()));
+}
+
+class _SquigglePainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final p = Paint()
+      ..color = K.accent
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.2
+      ..strokeCap = StrokeCap.round;
+    final path = Path()..moveTo(0, size.height * 0.6);
+    const waves = 5;
+    final w = size.width / waves;
+    for (var i = 0; i < waves; i++) {
+      // 波峰高低略有不同，看着像手画的
+      final up = i.isEven ? 0.05 : 0.2;
+      path.quadraticBezierTo(w * i + w * 0.25, size.height * up, w * i + w * 0.5, size.height * 0.55);
+      path.quadraticBezierTo(w * i + w * 0.75, size.height * (1.05 - up), w * (i + 1), size.height * 0.5);
+    }
+    canvas.drawPath(path, p);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter old) => false;
+}
+
+/// 珊瑚粉小星星 ✳（请柬上撒的那种），给小标题打头。
+class Sparkle extends StatelessWidget {
+  final double size;
+  const Sparkle({super.key, this.size = 13});
+  @override
+  Widget build(BuildContext context) => CustomPaint(size: Size.square(size), painter: _SparklePainter());
+}
+
+// 自己画：系统会把 ✳ 换成绿色 emoji
+class _SparklePainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final p = Paint()
+      ..color = K.accent
+      ..strokeWidth = size.width * 0.16
+      ..strokeCap = StrokeCap.round;
+    final c = size.center(Offset.zero);
+    final r = size.width / 2;
+    for (var i = 0; i < 4; i++) {
+      final a = i * 3.14159 / 4;
+      final d = Offset(r * 0.9 * cos(a), r * 0.9 * sin(a));
+      canvas.drawLine(c - d, c + d, p);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter old) => false;
+}
+
+/// 小标题：✳ + 字距拉开的深青墨字。
+class Label extends StatelessWidget {
+  final String text;
+  final Color color;
+  const Label(this.text, {super.key, this.color = K.ink});
+  @override
+  Widget build(BuildContext context) => Row(mainAxisSize: MainAxisSize.min, children: [
+        const Sparkle(),
+        const SizedBox(width: 7),
+        Text(text, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, letterSpacing: 2, color: color)),
+      ]);
+}
+
 /// 分类的颜色：同一类永远同一个色，一眼分得开。
 (Color, Color) categoryColors(String c) {
   const palette = [
-    (Color(0xFFEDF3D3), Color(0xFF4F8A22)), // 嫩芽绿
-    (Color(0xFFE2EEF0), Color(0xFF3B6E78)), // 雾蓝
-    (Color(0xFFFBE7DC), Color(0xFFA9573A)), // 腮红桃
-    (Color(0xFFF0E8F3), Color(0xFF7A5487)), // 浅紫
-    (Color(0xFFFAE9C8), Color(0xFF94681C)), // 奶黄
-    (Color(0xFFE3F0E4), Color(0xFF3F7A4A)), // 薄荷
+    (Color(0xFFDDE7D8), Color(0xFF2F5E50)), // 鼠尾草
+    (Color(0xFFF9E1DC), Color(0xFFB4483F)), // 信封粉
+    (Color(0xFFF5E6C2), Color(0xFF8F6514)), // 奶黄
+    (Color(0xFFDCE6EA), Color(0xFF2F5A6A)), // 雾蓝
+    (Color(0xFFEBE2EE), Color(0xFF6A4C78)), // 浅紫
+    (Color(0xFFE2EBE0), Color(0xFF3F6B4A)), // 薄荷
   ];
   const fixed = {'自言自语': 0, '与人对话': 1, '打电话': 1, '商业洽谈': 2, '开会': 2, '学习听课': 3, '嘉宾分享': 4, '生活日常': 5};
   return palette[fixed[c] ?? (c.codeUnits.fold<int>(0, (a, b) => a + b) % palette.length)];

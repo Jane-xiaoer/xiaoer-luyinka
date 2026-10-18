@@ -33,7 +33,7 @@ void showSettings(BuildContext context, Store store, Syncer syncer) {
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 value: deleteAfter,
-                activeThumbColor: K.green,
+                activeThumbColor: K.accent,
                 onChanged: (v) => set(() => deleteAfter = v),
                 title: const Text('整理好以后，删掉卡上的原文件'),
                 subtitle: const Text('给卡腾地方。整理好的内容和录音都留在这台设备上。', style: TextStyle(color: K.mute, fontSize: 13)),
@@ -65,7 +65,7 @@ void showSettings(BuildContext context, Store store, Syncer syncer) {
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: K.green),
+            style: FilledButton.styleFrom(backgroundColor: K.accent),
             onPressed: () {
               store.settings['rules'] = rules.text.trim();
               store.settings['deleteAfter'] = deleteAfter;

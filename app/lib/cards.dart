@@ -39,7 +39,7 @@ void showCardPicker(BuildContext context, Syncer syncer) {
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 18),
                 child: Row(children: [
-                  SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: K.green)),
+                  SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: K.accent)),
                   SizedBox(width: 10),
                   Text('正在找附近的卡…', style: TextStyle(color: K.mute)),
                 ]),
@@ -54,7 +54,7 @@ void showCardPicker(BuildContext context, Syncer syncer) {
                 ListTile(
                   contentPadding: const EdgeInsets.symmetric(horizontal: 8),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  leading: Icon(Icons.graphic_eq, color: c.id == syncer.boundId ? K.green : K.mute),
+                  leading: Icon(Icons.graphic_eq, color: c.id == syncer.boundId ? K.accent : K.mute),
                   title: Text(c.label, style: const TextStyle(fontWeight: FontWeight.w600)),
                   subtitle: Text(
                     [if (i == 0 && list.length > 1) '最近', if (c.id == syncer.boundId) '现在用的', _near(c.rssi)].join(' · '),
