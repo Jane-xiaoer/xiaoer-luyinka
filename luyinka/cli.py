@@ -5,6 +5,7 @@
   list          卡上的录音列表
   pull          下载新录音 → 封装 ogg → 转写 md（加 --delete 转完删卡上文件）
   transcribe F  转写任意本地音频文件（也能吃卡上导出的裸 .opus）
+  organize [日期] 切场景 + 简报 + 行动/提醒送进小耳灵感 + 推飞书「录音」表（不给日期 = 所有还没整理的）
   decode F      卡上裸 .opus → 可播放的 .ogg
 """
 
@@ -104,6 +105,17 @@ async def cmd_pull(args):
     print(f"新转写 {len(ok)} 个，失败 {len(bad)} 个。文字在：{pipeline.TEXT_DIR}")
     for r in bad:
         print("  ❌", r["file"], r["error"])
+    if ok and not args.no_organize:
+        cmd_organize(argparse.Namespace(day=None, no_push=False))
+
+
+def cmd_organize(args):
+    from . import scenes
+
+    for day in [args.day] if args.day else scenes.days_with_recordings():
+        r = scenes.organize(day, push=not args.no_push)
+        if r["new"] or args.day:
+            print(f"{day}：新切 {r['new']} 个场景，共 {r['scenes']} 个，{r['todo']} 件行动/提醒。简报 {r['brief']}")
 
 
 def cmd_transcribe(args):
@@ -137,6 +149,10 @@ def main(argv=None):
     sub.add_parser("list")
     p = sub.add_parser("pull")
     p.add_argument("--delete", action="store_true", help="转写完成后删除卡上的原文件")
+    p.add_argument("--no-organize", action="store_true", help="只拉和转写，不切场景")
+    o = sub.add_parser("organize")
+    o.add_argument("day", nargs="?", help="YYYY-MM-DD")
+    o.add_argument("--no-push", action="store_true", help="只在本机出场景卡和简报，不送小耳灵感、不推飞书")
     tr = sub.add_parser("transcribe")
     tr.add_argument("file")
     d = sub.add_parser("decode")

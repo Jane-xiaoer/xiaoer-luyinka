@@ -67,7 +67,9 @@ class Client:
     # ---------- 基础信息 ----------
 
     async def sync_time(self) -> None:
-        await self.send(P.cmd_sync_time())
+        from .clock import now  # 卡上的钟按她过日子的时区，不按 Mac 系统时区
+
+        await self.send(P.cmd_sync_time(now().replace(tzinfo=None)))
 
     async def battery(self, timeout: float = 5) -> int:
         await self.send(P.cmd_simple(P.TYPE_CONTROL, P.CTL_GET_BATTERY))
