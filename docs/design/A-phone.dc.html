@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>A 今天时间线 安卓</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&amp;family=Noto+Serif+SC:wght@600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.chip{font-size:12px;padding:2px 9px;border-radius:99px;background:#e4eed8;color:#3d6a1b;white-space:nowrap}
+.todo{font-size:12px;padding:2px 9px;border-radius:99px;background:#f6e6d2;color:#8a4f12;white-space:nowrap}
+</style>
+</helmet>
+<div style="width:390px;height:844px;box-sizing:border-box;background:#f3f2ee;color:#2b2a26;font-family:'Noto Sans SC','PingFang SC',sans-serif;display:flex;flex-direction:column;border-radius:32px;overflow:hidden;border:1px solid #dcd8cc">
+  <div style="padding:36px 20px 10px;display:flex;align-items:center;gap:8px">
+    <span style="width:8px;height:8px;border-radius:99px;background:#7BC043"></span>
+    <span style="font-size:13px;color:#5d5a52;flex:1">录音卡已连接 · 72% · 已同步</span>
+    <button aria-label="交给 Agent" style="height:36px;padding:0 12px;border-radius:10px;border:0;background:#2b2a26;color:#f3f2ee;font:inherit;font-size:13px">交给 Agent</button>
+  </div>
+  <div style="padding:6px 20px 12px"><div style="font-family:'Noto Serif SC',serif;font-size:28px;font-weight:700">今天 · 10/18</div><div style="font-size:14px;color:#5d5a52;margin-top:2px">5 个场景 · 4 件要办</div></div>
+  <div style="flex:1;overflow:hidden;padding:0 14px;display:flex;flex-direction:column;gap:10px">
+    <div style="background:#fbfaf7;border:1px solid #e2dfd6;border-radius:16px;padding:14px;display:flex;flex-direction:column;gap:6px"><div style="display:flex;gap:8px;align-items:center"><span style="font-size:13px;color:#7a776d">09:40</span><span class="chip">开会</span></div><b style="font-weight:600;font-size:16px">周会：下周发布排期</b><div style="font-size:14px;color:#5d5a52">定了 10/25 发版，测试周三前交。</div></div>
+    <div style="background:#fbfaf7;border:1px solid #d5e6c2;border-radius:16px;padding:14px;display:flex;flex-direction:column;gap:6px"><div style="display:flex;gap:8px;align-items:center"><span style="font-size:13px;color:#7a776d">11:05</span><span class="chip">商业洽谈</span><span class="todo">2 件要办</span></div><b style="font-weight:600;font-size:16px">跟老王谈报价</b><div style="font-size:14px;color:#5d5a52">谈月费和合同，约好下周三前发合同。</div></div>
+    <div style="background:#fbfaf7;border:1px solid #e2dfd6;border-radius:16px;padding:14px;display:flex;flex-direction:column;gap:6px"><div style="display:flex;gap:8px;align-items:center"><span style="font-size:13px;color:#7a776d">14:30</span><span class="chip">学习听课</span></div><b style="font-weight:600;font-size:16px">AI 编程分享会</b><div style="font-size:14px;color:#5d5a52">讲 agent 接工作台的三种做法。</div></div>
+    <div style="background:#fbfaf7;border:1px solid #e2dfd6;border-radius:16px;padding:14px;display:flex;flex-direction:column;gap:6px"><div style="display:flex;gap:8px;align-items:center"><span style="font-size:13px;color:#7a776d">15:02</span><span class="chip">自言自语</span><span class="todo">1 件要办</span></div><b style="font-weight:600;font-size:16px">规划去清迈</b></div>
+  </div>
+  <form style="margin:10px 14px 28px;display:flex;gap:8px;align-items:center;background:#fbfaf7;border:1px solid #d6d2c6;border-radius:16px;padding:6px 6px 6px 14px">
+    <label for="qa2" style="position:absolute;left:-9999px">问问今天的录音</label>
+    <input id="qa2" placeholder="问问今天的录音…" style="flex:1;border:0;background:none;font:inherit;font-size:15px;outline:none;min-width:0">
+    <button style="height:44px;padding:0 16px;border-radius:12px;border:0;background:#4A7A23;color:#fff;font:inherit;font-size:15px">问</button>
+  </form>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

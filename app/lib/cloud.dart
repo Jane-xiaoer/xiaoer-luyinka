@@ -12,9 +12,12 @@ class CloudError implements Exception {
 }
 
 class Cloud {
-  final String base;
+  String base;
   String? token;
-  Cloud(this.base, {this.token});
+  static Cloud? instance; // App 里只有一个
+  Cloud(this.base, {this.token}) {
+    instance = this;
+  }
 
   Map<String, String> get _auth => {'Authorization': 'Bearer ${token ?? ''}'};
 

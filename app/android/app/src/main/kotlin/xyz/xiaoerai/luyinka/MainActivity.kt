@@ -1,0 +1,5 @@
+package xyz.xiaoerai.luyinka
+
+import io.flutter.embedding.android.FlutterActivity
+
+class MainActivity : FlutterActivity()

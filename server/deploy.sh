@@ -10,7 +10,7 @@ source ~/.shared-skills/api-registry/.env
 : "${DEEPSEEK_API_KEY:?缺 DEEPSEEK_API_KEY}"
 
 echo "== 传代码"
-ssh "$HOST" 'mkdir -p /opt/luyinka-cloud'
+ssh "$HOST" 'sudo mkdir -p /opt/luyinka-cloud /var/lib/luyinka-cloud && sudo chown -R "$(id -un)" /opt/luyinka-cloud /var/lib/luyinka-cloud'
 rsync -az --delete --exclude __pycache__ luyinka server pyproject.toml "$HOST":/opt/luyinka-cloud/
 
 echo "== 服务器配置（大模型 key 只放服务器上，权限 600）"
@@ -26,7 +26,7 @@ EOF
 echo "== 环境 + 模型"
 ssh "$HOST" 'set -e
   export DEBIAN_FRONTEND=noninteractive
-  command -v ffmpeg >/dev/null || (apt-get update -qq && apt-get install -y -qq ffmpeg python3-venv)
+  command -v ffmpeg >/dev/null && python3 -c "import ensurepip" 2>/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg python3-venv)
   cd /opt/luyinka-cloud
   [ -x venv/bin/python ] || python3 -m venv venv
   venv/bin/pip install -q --upgrade pip
@@ -35,12 +35,13 @@ ssh "$HOST" 'set -e
 '
 
 echo "== systemd"
-ssh "$HOST" 'cat > /etc/systemd/system/luyinka-cloud.service <<EOF
+ssh "$HOST" 'sudo tee /etc/systemd/system/luyinka-cloud.service >/dev/null <<EOF
 [Unit]
 Description=录音卡云端（转写 + 切场景）
 After=network-online.target
 
 [Service]
+User=$(id -un)
 WorkingDirectory=/opt/luyinka-cloud
 Environment=LUYINKA_CONFIG=/opt/luyinka-cloud/server.json
 Environment=LUYINKA_CLOUD_DATA=/var/lib/luyinka-cloud
@@ -53,6 +54,6 @@ MemoryMax=2500M
 [Install]
 WantedBy=multi-user.target
 EOF
-systemctl daemon-reload && systemctl enable --now luyinka-cloud && sleep 3 && curl -s 127.0.0.1:8790/healthz'
+sudo systemctl daemon-reload && sudo systemctl enable luyinka-cloud && sudo systemctl restart luyinka-cloud && sleep 3 && curl -s 127.0.0.1:8790/healthz'
 echo
 echo "✅ 云端装好了（服务器本机 127.0.0.1:8790）"

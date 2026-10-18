@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>B 对话优先 安卓</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#4A7A23}
+.chip{font-size:11px;padding:1px 8px;border-radius:99px;background:#e4eed8;color:#3d6a1b;white-space:nowrap}
+.qk{height:36px;padding:0 12px;border-radius:99px;border:1px solid #cfd9c2;background:#fbfaf7;color:#3d6a1b;font:inherit;font-size:13px;white-space:nowrap}
+</style>
+</helmet>
+<div style="width:390px;height:844px;box-sizing:border-box;background:#f3f2ee;color:#2b2a26;font-family:'Noto Sans SC','PingFang SC',sans-serif;display:flex;flex-direction:column;border-radius:32px;overflow:hidden;border:1px solid #dcd8cc">
+  <div style="padding:36px 18px 10px;display:flex;align-items:center;gap:8px;border-bottom:1px solid #e2dfd6">
+    <b style="font-size:17px;flex:1">小耳录音卡</b>
+    <span style="display:flex;align-items:center;gap:6px;font-size:12px;color:#5d5a52"><span style="width:8px;height:8px;border-radius:99px;background:#7BC043"></span>72%</span>
+  </div>
+  <div style="flex:1;overflow:hidden;padding:16px;display:flex;flex-direction:column;gap:14px">
+    <div style="font-size:15px;line-height:1.7">今天录了 <b>6 小时 12 分</b>，切成 5 段。最要紧：<b>下周三前把合同发给老王</b>，已记进提醒。</div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="background:#fbfaf7;border:1px solid #d5e6c2;border-radius:14px;padding:12px;display:flex;flex-direction:column;gap:4px"><div style="display:flex;gap:8px;align-items:center;font-size:12px;color:#7a776d">11:05<span class="chip">商业洽谈</span></div><b style="font-weight:600">跟老王谈报价</b></div>
+      <div style="background:#fbfaf7;border:1px solid #e2dfd6;border-radius:14px;padding:12px;display:flex;flex-direction:column;gap:4px"><div style="display:flex;gap:8px;align-items:center;font-size:12px;color:#7a776d">09:40<span class="chip">开会</span></div><b style="font-weight:600">周会：下周发布排期</b></div>
+      <a href="#" style="font-size:13px;text-decoration:none">看今天全部 5 段 ›</a>
+    </div>
+    <div style="align-self:flex-end;max-width:280px;background:#2b2a26;color:#f3f2ee;border-radius:16px 16px 4px 16px;padding:9px 14px;font-size:15px">老王说年付多少钱？</div>
+    <div style="font-size:15px;line-height:1.7">年付打 8 折，一年 19200。原话在 <a href="#">11:12</a>。</div>
+  </div>
+  <div style="display:flex;gap:8px;padding:0 14px 8px;overflow:hidden">
+    <button class="qk">今天要办的</button><button class="qk">整理成日报</button><button class="qk" style="background:#2b2a26;color:#f3f2ee;border-color:#2b2a26">分享给…</button>
+  </div>
+  <form style="margin:0 14px 28px;display:flex;gap:8px;align-items:center;background:#fbfaf7;border:1px solid #d6d2c6;border-radius:16px;padding:6px 6px 6px 14px">
+    <label for="qb2" style="position:absolute;left:-9999px">问问我的录音</label>
+    <input id="qb2" placeholder="问问我的录音…" style="flex:1;border:0;background:none;font:inherit;font-size:15px;outline:none;min-width:0">
+    <button style="height:44px;padding:0 16px;border-radius:12px;border:0;background:#4A7A23;color:#fff;font:inherit;font-size:15px">发送</button>
+  </form>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

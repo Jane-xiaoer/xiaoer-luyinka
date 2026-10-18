@@ -14,8 +14,9 @@ class Scene {
   final String stem; // 属于哪条录音（播放、取全文用）
   Scene(this.d, this.stem);
   String get id => d['id'] ?? '';
-  DateTime get start => DateTime.parse(d['start']);
-  DateTime get end => DateTime.parse(d['end']);
+  // 按录音当时的墙上时间显示（不换算成本机 / UTC）：只取 ISO 串的前 19 位
+  DateTime get start => DateTime.parse(d['start'].toString().substring(0, 19));
+  DateTime get end => DateTime.parse(d['end'].toString().substring(0, 19));
   String get category => d['category'] ?? '';
   String get title => d['title'] ?? '';
   String get event => d['event'] ?? '';

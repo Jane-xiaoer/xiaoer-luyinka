@@ -5,3 +5,4 @@ __pycache__/
 vendor/raw/
 app/build/
 app/.dart_tool/
+app/dist/

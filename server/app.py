@@ -296,14 +296,23 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=int(os.environ.get("PORT", 8790)))
     ap.add_argument("--host", default="0.0.0.0")
+    ap.add_argument("--tls-cert", help="https 证书（fullchain）；不给就是 http")
+    ap.add_argument("--tls-key")
     args = ap.parse_args()
     DATA.mkdir(parents=True, exist_ok=True)
     if not shutil.which("ffmpeg"):
         sys.exit("服务器上要装 ffmpeg")
     threading.Thread(target=worker, daemon=True).start()
     requeue()
-    log(f"录音卡云端在 {args.host}:{args.port}，数据 {DATA}")
-    ThreadingHTTPServer((args.host, args.port), H).serve_forever()
+    httpd = ThreadingHTTPServer((args.host, args.port), H)
+    if args.tls_cert:
+        import ssl
+
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.load_cert_chain(args.tls_cert, args.tls_key)
+        httpd.socket = ctx.wrap_socket(httpd.socket, server_side=True)
+    log(f"录音卡云端在 {'https' if args.tls_cert else 'http'}://{args.host}:{args.port}，数据 {DATA}")
+    httpd.serve_forever()
 
 
 if __name__ == "__main__":
