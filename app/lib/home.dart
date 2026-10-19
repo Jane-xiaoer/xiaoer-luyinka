@@ -1,4 +1,5 @@
 // 主界面（方向 A · 今天时间线）：宽屏三栏 = 日子 / 当天时间线 + 问答 / 场景详情 + 播放条；手机 = 当天列表 → 点进详情。
+import 'dart:async';
 import 'dart:io';
 
 import 'package:audioplayers/audioplayers.dart';
@@ -11,6 +12,7 @@ import 'cards.dart';
 import 'handoff.dart';
 import 'llm.dart';
 import 'md_view.dart';
+import 'search.dart';
 import 'settings.dart';
 import 'store.dart';
 import 'sync.dart';
@@ -31,8 +33,48 @@ class _HomeState extends State<Home> {
   bool _byCat = false; // 按天看 / 按类别看
   String? _cat;
   final player = Player();
+  final _search = TextEditingController();
+  final _askKey = GlobalKey(); // 搜索 / 按天 / 按类别来回切，对话不丢
+  Timer? _debounce;
+  String _query = '';
+  List<SearchHit>? _hits;
 
   Store get store => widget.store;
+
+  bool get searching => searchTerms(_query).isNotEmpty;
+  List<SearchHit> get hits => _hits ??= searchScenes(store.scenes, _query);
+
+  void _onSearch(String v) {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 200), () {
+      if (mounted) {
+        setState(() {
+          _query = v;
+          _hits = null;
+        });
+      }
+    });
+  }
+
+  void _resetSearch() {
+    _debounce?.cancel();
+    _search.clear();
+    _query = '';
+    _hits = null;
+  }
+
+  void clearSearch() => setState(_resetSearch);
+
+  /// 对话里小耳找到的那段：切到那天，右栏打开它。
+  void openFound(Scene s) {
+    setState(() {
+      _resetSearch();
+      _byCat = false;
+      _day = s.dayKey;
+      _sceneId = s.id;
+    });
+    if (MediaQuery.sizeOf(context).width < 900) _openNarrow(s);
+  }
 
   @override
   void initState() {
@@ -44,11 +86,13 @@ class _HomeState extends State<Home> {
   }
 
   void _onStore() {
-    if (mounted) setState(() {});
+    if (mounted) setState(() => _hits = null);
   }
 
   @override
   void dispose() {
+    _debounce?.cancel();
+    _search.dispose();
     store.removeListener(_onStore);
     player.dispose();
     super.dispose();
@@ -68,8 +112,10 @@ class _HomeState extends State<Home> {
 
   List<Scene> get scenes => _byCat ? (cat == null ? [] : store.byCategory[cat]!) : (day == null ? [] : store.days[day]!);
 
+  String get topic => _byCat ? 'cat:$cat' : 'day:$day';
+
   Scene? get scene {
-    final l = scenes;
+    final l = searching ? [for (final h in hits) h.scene] : scenes;
     if (l.isEmpty) return null;
     return l.firstWhere((s) => s.id == _sceneId, orElse: () => l.firstWhere((s) => s.todo > 0, orElse: () => l.first));
   }
@@ -115,7 +161,8 @@ class _HomeState extends State<Home> {
             width: 228,
             child: Sidebar(
                 store: store, syncer: widget.syncer, day: day, onPick: pickDay,
-                byCat: _byCat, cat: cat, onPickCat: pickCat, onMode: setMode)),
+                byCat: _byCat, cat: cat, onPickCat: pickCat, onMode: setMode,
+                search: SearchField(controller: _search, onChanged: _onSearch, onClear: clearSearch))),
         Expanded(child: Container(
           margin: const EdgeInsets.fromLTRB(0, 12, 12, 12),
           clipBehavior: Clip.antiAlias,
@@ -127,12 +174,16 @@ class _HomeState extends State<Home> {
           child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         SizedBox(
           width: (MediaQuery.sizeOf(context).width * 0.36).clamp(360, 470).toDouble(),
-          child: _byCat
-              ? CatColumn(store: store, cat: cat, scenes: scenes, selected: scene?.id,
-                  onPick: (s) => setState(() => _sceneId = s.id), top: 34)
-              : DayColumn(
-                  store: store, day: day, scenes: scenes, selected: scene?.id, onHandoff: _handoff,
-                  onPick: (s) => setState(() => _sceneId = s.id)),
+          child: searching
+              ? SearchColumn(
+                  store: store, hits: hits, scenes: scenes, topic: topic, selected: scene?.id, top: 34,
+                  askKey: _askKey, onOpen: openFound, onPick: (s) => setState(() => _sceneId = s.id))
+              : _byCat
+                  ? CatColumn(store: store, cat: cat, scenes: scenes, selected: scene?.id,
+                      askKey: _askKey, onOpen: openFound, onPick: (s) => setState(() => _sceneId = s.id), top: 34)
+                  : DayColumn(
+                      store: store, day: day, scenes: scenes, selected: scene?.id, onHandoff: _handoff,
+                      askKey: _askKey, onOpen: openFound, onPick: (s) => setState(() => _sceneId = s.id)),
         ),
         const VerticalDivider(width: 1, color: K.line),
         Expanded(
@@ -144,7 +195,11 @@ class _HomeState extends State<Home> {
       ]);
 
   Widget _narrow() => Column(children: [
-        if (store.days.isNotEmpty)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+          child: SearchField(controller: _search, onChanged: _onSearch, onClear: clearSearch),
+        ),
+        if (store.days.isNotEmpty && !searching)
           SizedBox(
             height: 48,
             child: ListView(scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: 12), children: [
@@ -167,9 +222,14 @@ class _HomeState extends State<Home> {
             ]),
           ),
         Expanded(
-          child: _byCat
-              ? CatColumn(store: store, cat: cat, scenes: scenes, selected: null, onPick: _openNarrow)
-              : DayColumn(store: store, day: day, scenes: scenes, selected: null, onPick: _openNarrow),
+          child: searching
+              ? SearchColumn(store: store, hits: hits, scenes: scenes, topic: topic, selected: null,
+                  askKey: _askKey, onOpen: openFound, onPick: _openNarrow)
+              : _byCat
+                  ? CatColumn(store: store, cat: cat, scenes: scenes, selected: null,
+                      askKey: _askKey, onOpen: openFound, onPick: _openNarrow)
+                  : DayColumn(store: store, day: day, scenes: scenes, selected: null,
+                      askKey: _askKey, onOpen: openFound, onPick: _openNarrow),
         ),
       ]);
 
@@ -276,9 +336,10 @@ class Sidebar extends StatelessWidget {
   final bool byCat;
   final void Function(String) onPick, onPickCat;
   final void Function(bool) onMode;
+  final Widget? search;
   const Sidebar(
       {super.key, required this.store, required this.syncer, required this.day, required this.onPick,
-      required this.byCat, required this.cat, required this.onPickCat, required this.onMode});
+      required this.byCat, required this.cat, required this.onPickCat, required this.onMode, this.search});
 
   @override
   Widget build(BuildContext context) => Container(
@@ -297,6 +358,7 @@ class Sidebar extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
             child: ModeSwitch(byCat: byCat, onMode: onMode),
           ),
+          if (search != null) Padding(padding: const EdgeInsets.fromLTRB(12, 0, 12, 10), child: search),
           Expanded(
               child: byCat ? CatNav(store: store, cat: cat, onPick: onPickCat) : DayNav(store: store, day: day, onPick: onPick)),
           CardPanel(syncer: syncer, store: store),
@@ -333,6 +395,48 @@ class ModeSwitch extends StatelessWidget {
       child: Row(mainAxisSize: compact ? MainAxisSize.min : MainAxisSize.max, children: [seg('按天', false), seg('按类别', true)]),
     );
   }
+}
+
+/// 左栏搜索框：输入就搜（防抖在外面做），Esc 或 × 清空。
+class SearchField extends StatelessWidget {
+  final TextEditingController controller;
+  final void Function(String) onChanged;
+  final VoidCallback onClear;
+  const SearchField({super.key, required this.controller, required this.onChanged, required this.onClear});
+
+  @override
+  Widget build(BuildContext context) => CallbackShortcuts(
+        bindings: {const SingleActivator(LogicalKeyboardKey.escape): onClear},
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(10, 2, 2, 2),
+          decoration: BoxDecoration(color: K.card.withValues(alpha: 0.85), borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: K.line)),
+          child: Row(children: [
+            const Icon(Icons.search, size: 17, color: K.faint),
+            const SizedBox(width: 6),
+            Expanded(
+              child: TextField(
+                controller: controller,
+                onChanged: onChanged,
+                style: const TextStyle(fontSize: 13.5),
+                decoration: const InputDecoration(hintText: '搜标题、人、说过的话…', hintStyle: TextStyle(fontSize: 13, color: K.faint),
+                    contentPadding: EdgeInsets.symmetric(vertical: 8)),
+              ),
+            ),
+            ValueListenableBuilder(
+              valueListenable: controller,
+              builder: (_, v, _) => v.text.isEmpty
+                  ? const SizedBox(height: 32)
+                  : IconButton(
+                      tooltip: '清空搜索',
+                      visualDensity: VisualDensity.compact,
+                      icon: const Icon(Icons.close, size: 16, color: K.mute),
+                      onPressed: onClear,
+                    ),
+            ),
+          ]),
+        ),
+      );
 }
 
 /// 左栏：类别 + 数量。
@@ -481,9 +585,11 @@ class DayColumn extends StatelessWidget {
   final String? selected;
   final void Function(Scene) onPick;
   final VoidCallback? onHandoff; // 宽屏：「交给 Agent」放在日期右边；手机在顶栏
+  final Key? askKey;
+  final void Function(Scene)? onOpen; // 对话里找到的那段被点了
   const DayColumn(
       {super.key, required this.store, required this.day, required this.scenes, required this.selected, required this.onPick,
-      this.onHandoff});
+      this.onHandoff, this.askKey, this.onOpen});
 
   @override
   Widget build(BuildContext context) {
@@ -512,7 +618,8 @@ class DayColumn extends StatelessWidget {
       ),
       Expanded(
         child: AskBox(
-          store: store, scenes: scenes, topic: 'day:$day', focus: _focus(scenes, selected),
+          key: askKey, store: store, scenes: scenes, all: store.scenes, onOpen: onOpen,
+          topic: 'day:$day', focus: _focus(scenes, selected),
           child: ListView(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6), children: [
             for (final s in scenes) SceneRow(scene: s, selected: s.id == selected, onTap: () => onPick(s)),
           ]),
@@ -530,9 +637,11 @@ class CatColumn extends StatelessWidget {
   final String? selected;
   final void Function(Scene) onPick;
   final double top;
+  final Key? askKey;
+  final void Function(Scene)? onOpen;
   const CatColumn(
       {super.key, required this.store, required this.cat, required this.scenes, required this.selected, required this.onPick,
-      this.top = 20});
+      this.top = 20, this.askKey, this.onOpen});
 
   @override
   Widget build(BuildContext context) {
@@ -565,7 +674,8 @@ class CatColumn extends StatelessWidget {
       ),
       Expanded(
         child: AskBox(
-          store: store, scenes: scenes, topic: 'cat:$cat', focus: _focus(scenes, selected),
+          key: askKey, store: store, scenes: scenes, all: store.scenes, onOpen: onOpen,
+          topic: 'cat:$cat', focus: _focus(scenes, selected),
           hint: '问问小耳：这些${catFolder(cat!)}里…也可以让它写东西',
           child: ListView(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6), children: [
             for (final g in groups.entries) ...[
@@ -589,13 +699,87 @@ class CatColumn extends StatelessWidget {
   }
 }
 
+/// 中栏（搜索时）：所有日子里搜到的段，每条带一小段命中处的上下文；底下照样能问小耳。
+class SearchColumn extends StatelessWidget {
+  final Store store;
+  final List<SearchHit> hits;
+  final List<Scene> scenes; // 搜之前那个视图的场景，问小耳时当资料
+  final String topic;
+  final String? selected;
+  final void Function(Scene) onPick;
+  final void Function(Scene)? onOpen;
+  final Key? askKey;
+  final double top;
+  const SearchColumn(
+      {super.key, required this.store, required this.hits, required this.scenes, required this.topic, required this.selected,
+      required this.onPick, this.onOpen, this.askKey, this.top = 20});
+
+  @override
+  Widget build(BuildContext context) {
+    final found = [for (final h in hits) h.scene];
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Padding(
+        padding: EdgeInsets.fromLTRB(24, top, 20, 12),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('搜索结果', style: K.title(26).copyWith(color: K.ink)),
+          const SizedBox(height: 2),
+          const Squiggle(width: 132),
+          const SizedBox(height: 10),
+          _Stat(Icons.search, hits.isEmpty ? '没找到' : '找到 ${hits.length} 段'),
+        ]),
+      ),
+      Expanded(
+        child: AskBox(
+          key: askKey, store: store, scenes: scenes, all: store.scenes, onOpen: onOpen,
+          topic: topic, focus: _focus(found, selected),
+          hint: '问问小耳：模糊说说那天大概聊了啥，让它帮你找',
+          child: hits.isEmpty
+              ? const Center(
+                  child: Padding(
+                    padding: EdgeInsets.all(24),
+                    child: Text('没找到，试试在下面问小耳', style: TextStyle(color: K.mute, fontSize: 14)),
+                  ),
+                )
+              : ListView(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6), children: [
+                  for (final h in hits)
+                    SceneRow(scene: h.scene, selected: h.scene.id == selected, onTap: () => onPick(h.scene), showDate: true,
+                        extra: SnippetText(h.snippet)),
+                ]),
+        ),
+      ),
+    ]);
+  }
+}
+
+/// 命中处的上下文，命中词用珊瑚粉标出来。
+class SnippetText extends StatelessWidget {
+  final Snippet snippet;
+  const SnippetText(this.snippet, {super.key});
+  @override
+  Widget build(BuildContext context) {
+    final t = snippet.text;
+    final spans = <TextSpan>[];
+    var at = 0;
+    for (final (a, b) in snippet.marks) {
+      if (a > at) spans.add(TextSpan(text: t.substring(at, a)));
+      spans.add(TextSpan(text: t.substring(a, b), style: const TextStyle(color: K.accent, fontWeight: FontWeight.w700)));
+      at = b;
+    }
+    if (at < t.length) spans.add(TextSpan(text: t.substring(at)));
+    return Text.rich(TextSpan(children: spans), maxLines: 3, overflow: TextOverflow.ellipsis,
+        style: const TextStyle(fontSize: 12.5, color: K.faint, height: 1.5));
+  }
+}
+
 Scene? _focus(List<Scene> scenes, String? id) => id == null ? null : scenes.where((s) => s.id == id).firstOrNull;
 
 class SceneRow extends StatelessWidget {
   final Scene scene;
   final bool selected, showDate;
   final VoidCallback onTap;
-  const SceneRow({super.key, required this.scene, required this.selected, required this.onTap, this.showDate = false});
+  final Widget? extra; // 事件下面再加一行（搜索结果的命中片段）
+  const SceneRow(
+      {super.key, required this.scene, required this.selected, required this.onTap, this.showDate = false, this.extra});
 
   @override
   Widget build(BuildContext context) => Padding(
@@ -628,6 +812,7 @@ class SceneRow extends StatelessWidget {
                     const SizedBox(height: 4),
                     Text(scene.event, maxLines: 2, overflow: TextOverflow.ellipsis,
                         style: const TextStyle(fontSize: 13, color: K.mute, height: 1.5)),
+                    if (extra != null) ...[const SizedBox(height: 4), extra!],
                   ]),
                 ),
               ]),
@@ -677,24 +862,29 @@ class Hint extends StatelessWidget {
 
 /// 「问问小耳」：底部输入框 + 上方展开的对话区（盖在列表上面，能收起）。
 /// 能连续追问；正在看的那段（[focus]）优先交给模型；换天 / 换类别（[topic] 变了）对话清空。
+/// [all] 是所有日子的场景，给模型当目录帮我找记录；它找到的段在回答下面列成卡片，点了交给 [onOpen]。
 class AskBox extends StatefulWidget {
   final Store store;
   final List<Scene> scenes;
+  final List<Scene> all;
   final Scene? focus;
   final String topic;
   final String hint;
+  final void Function(Scene)? onOpen;
   final Widget child; // 平时显示的列表
   const AskBox(
       {super.key, required this.store, required this.scenes, required this.topic, required this.child, this.focus,
-      this.hint = '问问小耳：这天我答应了谁什么？也可以让它写东西'});
+      this.all = const [], this.onOpen, this.hint = '问问小耳：这天我答应了谁什么？也可以让它帮你找哪一段'});
   @override
   State<AskBox> createState() => _AskBoxState();
 }
 
 class _Msg {
   final bool me, error;
-  final String text;
-  const _Msg(this.me, this.text, {this.error = false});
+  final String text; // 显示 / 拷贝用：去掉了 [[找到: …]]
+  final String raw; // 模型原话，进历史
+  final List<String> found;
+  const _Msg(this.me, this.text, {this.error = false, String? raw, this.found = const []}) : raw = raw ?? text;
 }
 
 class _AskBoxState extends State<AskBox> {
@@ -703,12 +893,22 @@ class _AskBoxState extends State<AskBox> {
   final _msgs = <_Msg>[];
   bool _busy = false, _open = false;
   int _gen = 0; // 清空 / 换了资料后，路上的回答作废
+  bool _keep = false; // 点了找到的卡片跳到别的日子：这次换 topic 不清空对话
 
   @override
   void didUpdateWidget(AskBox old) {
     super.didUpdateWidget(old);
-    if (old.topic != widget.topic) _clear();
+    if (old.topic != widget.topic && !_keep) _clear();
   }
+
+  void _openFound(Scene s) {
+    _keep = true;
+    widget.onOpen?.call(s);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _keep = false);
+  }
+
+  Scene? _byId(String id) =>
+      widget.all.where((s) => s.id == id).firstOrNull ?? widget.scenes.where((s) => s.id == id).firstOrNull;
 
   @override
   void dispose() {
@@ -726,7 +926,7 @@ class _AskBoxState extends State<AskBox> {
 
   List<Turn> get _history => [
         for (var i = 0; i + 1 < _msgs.length; i++)
-          if (_msgs[i].me && !_msgs[i + 1].me && !_msgs[i + 1].error) Turn(_msgs[i].text, _msgs[i + 1].text),
+          if (_msgs[i].me && !_msgs[i + 1].me && !_msgs[i + 1].error) Turn(_msgs[i].text, _msgs[i + 1].raw),
       ];
 
   void _toBottom() => WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -738,7 +938,8 @@ class _AskBoxState extends State<AskBox> {
   Future<void> _ask() async {
     final q = _q.text.trim();
     if (q.isEmpty || _busy) return;
-    final messages = buildAskMessages(scenes: widget.scenes, focus: widget.focus, history: _history, question: q);
+    final messages =
+        buildAskMessages(scenes: widget.scenes, focus: widget.focus, all: widget.all, history: _history, question: q);
     final gen = _gen;
     setState(() {
       _msgs.add(_Msg(true, q));
@@ -750,7 +951,10 @@ class _AskBoxState extends State<AskBox> {
     _Msg answer;
     try {
       final a = await Llm.instance!.chatMessages(messages, temperature: 0.5);
-      answer = a.isEmpty ? const _Msg(false, '模型没回内容，再问一次试试。', error: true) : _Msg(false, a);
+      final (clean, ids) = parseFound(a);
+      answer = a.isEmpty
+          ? const _Msg(false, '模型没回内容，再问一次试试。', error: true)
+          : _Msg(false, clean.isEmpty && ids.isNotEmpty ? '找到这几段：' : clean, raw: a, found: ids);
     } catch (e) {
       answer = _Msg(false, '没问成：$e', error: true);
     }
@@ -799,6 +1003,8 @@ class _AskBoxState extends State<AskBox> {
                 )
               else
                 Padding(padding: const EdgeInsets.only(right: 6), child: MdView(m.text)),
+              for (final s in [for (final id in m.found) _byId(id)].nonNulls)
+                Padding(padding: const EdgeInsets.only(top: 8, right: 6), child: FoundCard(scene: s, onTap: () => _openFound(s))),
               if (!m.error)
                 Align(
                   alignment: Alignment.centerRight,
@@ -915,6 +1121,47 @@ class _AskBoxState extends State<AskBox> {
         ),
       ]);
 }
+/// 对话里小耳找到的一段：日期钟点 + 类别 + 标题 + 事件，点了打开。
+class FoundCard extends StatelessWidget {
+  final Scene scene;
+  final VoidCallback onTap;
+  const FoundCard({super.key, required this.scene, required this.onTap});
+  @override
+  Widget build(BuildContext context) {
+    final s = scene;
+    return Material(
+      color: K.card,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: const BorderSide(color: K.accentEdge)),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 9, 10, 9),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Wrap(spacing: 8, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
+                  Text('${s.start.month}/${s.start.day} ${hm(s.start)}',
+                      style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: K.accent,
+                          fontFeatures: [FontFeature.tabularFigures()])),
+                  Chip2(s.category),
+                  Text(s.title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: K.ink)),
+                ]),
+                if (s.event.isNotEmpty) ...[
+                  const SizedBox(height: 3),
+                  Text(s.event, maxLines: 2, overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 12.5, color: K.mute, height: 1.5)),
+                ],
+              ]),
+            ),
+            const Padding(padding: EdgeInsets.only(top: 2), child: Icon(Icons.chevron_right, size: 18, color: K.accent)),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
 // ───────── 右栏：场景详情 ─────────
 
 int _secs(String clock) {

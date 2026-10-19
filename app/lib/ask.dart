@@ -2,6 +2,7 @@
 import 'dart:convert';
 
 import 'library.dart';
+import 'search.dart';
 import 'store.dart';
 import 'templates.dart';
 
@@ -15,6 +16,7 @@ class Turn {
 String focusBlock(Scene s, {int focusMax = 40000}) {
   final b = StringBuffer()
     ..writeln('## 我正在看的这一段')
+    ..writeln('- id：${s.id}')
     ..writeln('- 时间：${s.d['start'].toString().substring(0, 16).replaceFirst('T', ' ')}–${s.d['end'].toString().substring(11, 16)}')
     ..writeln('- 类别：${s.category}')
     ..writeln('- 标题：${s.title}');
@@ -40,6 +42,7 @@ String backgroundBlock(List<Scene> scenes, int max) {
   final ctx = [
     for (final s in scenes)
       {
+        'id': s.id,
         'time': '${s.d['start']}–${s.d['end'].toString().substring(11, 16)}',
         'category': s.category,
         'title': s.title,
@@ -63,10 +66,13 @@ String backgroundBlock(List<Scene> scenes, int max) {
 }
 
 /// 拼 messages：system（提示词 + 资料）→ 前面几轮 → 这次的问题。
-/// 资料：正在看的那段放最前、不截断；其余场景按剩下的额度放。历史太长只丢最早的轮次。
+/// 资料：正在看的那段放最前、不截断；其余场景按剩下的额度放；[all] 是所有日子的场景（新的在前），只给目录，用来帮我找记录。
+/// 历史太长只丢最早的轮次。
 List<Map<String, String>> buildAskMessages({
   required List<Scene> scenes,
   Scene? focus,
+  List<Scene> all = const [],
+  int catalogMax = 30000,
   List<Turn> history = const [],
   required String question,
   int materialMax = 70000,
@@ -84,6 +90,8 @@ List<Map<String, String>> buildAskMessages({
   final bg = backgroundBlock(rest, (materialMax - used).clamp(backgroundMin, materialMax));
   if (bg.isNotEmpty) parts.add('## ${focus == null ? '我的录音记录' : '其余录音记录（背景）'}（JSON）\n$bg');
   if (parts.isEmpty) parts.add('## 我的录音记录\n（这里还没有记录）');
+  final cat = catalogBlock(all, max: catalogMax);
+  if (cat.isNotEmpty) parts.add('## 全部记录目录（所有日子，新的在前；每行：id | 日期 钟点 | 类别 | 标题 | 事件 | 人物 | 地点）\n$cat');
 
   final kept = <Turn>[];
   var size = 0;
