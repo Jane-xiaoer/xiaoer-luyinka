@@ -1388,9 +1388,9 @@ class SceneDetail extends StatelessWidget {
       const Squiggle(width: 96),
       const SizedBox(height: 8),
       SelectableText(s.event, style: const TextStyle(fontSize: 15, height: 1.7)),
+      if (!s.noise && onQuick != null) ...[const SizedBox(height: 10), QuickBar(scene: s, store: store, onQuick: onQuick!)],
       const SizedBox(height: 16),
       if (!s.noise) ...[NoteCard(scene: s, store: store), const SizedBox(height: 12)],
-      if (!s.noise && onQuick != null) ...[QuickBar(scene: s, store: store, onQuick: onQuick!), const SizedBox(height: 12)],
       if (s.body.isEmpty && s.minutes != null) ...[Minutes(scene: s), const SizedBox(height: 12)],
       if (s.body.isEmpty) LayoutBuilder(builder: (_, c) {
         final boxes = [
@@ -1712,16 +1712,17 @@ class QuickBar extends StatelessWidget {
     final table = store.hasLib ? store.lib.quickActionsTable() : quickActions;
     final acts = table[scene.category] ?? const [];
     if (acts.isEmpty) return const SizedBox();
-    return Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
-      const Text('拿去用', style: TextStyle(fontSize: 12.5, color: K.faint, fontWeight: FontWeight.w600)),
+    return Wrap(spacing: 6, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
+      const Text('拿去用', style: TextStyle(fontSize: 12, color: K.faint, fontWeight: FontWeight.w600)),
       for (final (name, ask) in acts)
-        OutlinedButton.icon(
+        OutlinedButton(
           style: OutlinedButton.styleFrom(
               foregroundColor: K.accent, side: const BorderSide(color: K.accentEdge), visualDensity: VisualDensity.compact,
-              padding: const EdgeInsets.symmetric(horizontal: 12), textStyle: const TextStyle(fontSize: 13)),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap, minimumSize: const Size(0, 28),
+              padding: const EdgeInsets.symmetric(horizontal: 10), textStyle: const TextStyle(fontSize: 12.5),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(99))),
           onPressed: () => onQuick(scene, name, ask),
-          icon: const Icon(Icons.auto_awesome_outlined, size: 15),
-          label: Text(name),
+          child: Text(name),
         ),
     ]);
   }

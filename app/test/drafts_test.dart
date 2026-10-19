@@ -221,4 +221,28 @@ void main() {
     expect(llm.calls[1][1]['content'], quickActions['个人感悟']![0].$2);
     expect(find.text('存成稿'), findsOneWidget); // 新回答还没存
   });
+  testWidgets('右栏：拿去用按钮在标题和事件下面、笔记卡片上面；窄屏换行', (tester) async {
+    final store = Store(Directory('${tmp.path}/app'))..lib = lib;
+    final player = Player();
+    addTearDown(player.dispose);
+    final body = '## 感悟了什么\n${List.generate(80, (i) => '- 第$i条很长的笔记').join('\n')}';
+    final s = Scene({...ai.d, 'body': body}, ai.stem);
+    String? got;
+    await tester.binding.setSurfaceSize(const Size(360, 700));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(body: SceneDetail(scene: s, player: player, store: store, onQuick: (_, l, _) => got = l)),
+    ));
+    final bar = find.byType(QuickBar);
+    expect(bar, findsOneWidget); // 第一屏就有，不用滚
+    final barTop = tester.getTopLeft(bar).dy;
+    expect(barTop, greaterThan(tester.getBottomLeft(find.text(s.event)).dy - 1));
+    expect(barTop, lessThan(tester.getTopLeft(find.byType(NoteCard)).dy));
+    expect(tester.getBottomLeft(bar).dy, lessThan(700));
+    final b1 = tester.getTopLeft(find.text('写成公众号文章')).dy, b3 = tester.getTopLeft(find.text('写成 3 分钟演讲稿')).dy;
+    expect(b3, greaterThan(b1)); // 360 宽放不下一排，换行了
+    expect(tester.takeException(), isNull);
+    await tester.tap(find.text('写成朋友圈'));
+    expect(got, '写成朋友圈');
+  });
 }
