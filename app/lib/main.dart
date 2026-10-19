@@ -11,7 +11,7 @@ import 'sync.dart';
 import 'theme.dart';
 
 /// 云端地址：编译时 --dart-define=LUYINKA_CLOUD=… 可改，设置里也能改。
-const defaultCloud = String.fromEnvironment('LUYINKA_CLOUD', defaultValue: 'https://luyinka.blitzer.studio:8443');
+const defaultCloud = String.fromEnvironment('LUYINKA_CLOUD', defaultValue: 'https://luyinka.xiaoeromia.com:8443');
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();

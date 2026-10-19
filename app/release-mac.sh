@@ -5,7 +5,7 @@
 # 公证凭据在钥匙串 profile「omia-notary」。没有这个 profile 就只签名不公证（别人第一次打开要去「隐私与安全性」点仍要打开）。
 set -euo pipefail
 cd "$(dirname "$0")"
-CLOUD=${LUYINKA_CLOUD:-https://luyinka.blitzer.studio:8443}
+CLOUD=${LUYINKA_CLOUD:-https://luyinka.xiaoeromia.com:8443}
 VER=$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d+ -f1)
 APP=build/macos/Build/Products/Release/XiaoerLuyinka.app
 OUT=dist/小耳录音卡.app
