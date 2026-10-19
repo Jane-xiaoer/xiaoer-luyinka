@@ -2,6 +2,7 @@
 //   每日/2026-10-18.md                    这天的时间线（每段：钟点 · 类别 · 标题 · 事件）
 //   会议纪要/2026-10-18 14.00 标题.md       按类别分文件夹，一段一个笔记（时间地点人物事件 + 按模板整理 + 逐字稿）
 //   现场调研/按对象/某某公司.md              同一个调研对象的历次记录都追加在这（下次调研同一对象时当背景）
+//   个人感悟/观点库.md                       历次感悟里的观点和演讲素材汇在一起（准备演讲时翻这一份）
 //   逐字稿/<录音>.md                       整条录音的全文
 //   录音/<录音>.m4a                        播放用
 //   模板/<类别>.md                         各类别的整理方式，可以直接改
@@ -34,6 +35,7 @@ class Library {
   File templateFile(String cat) => File('$path/模板/$cat.md');
   Directory get subjectsDir => Directory('$path/现场调研/按对象');
   File subjectFile(String s) => File('${subjectsDir.path}/${safe(s)}.md');
+  File get ideasFile => File('$path/个人感悟/观点库.md');
 
   Future<void> ensure() async {
     for (final d in ['.xiaoer', '录音', '逐字稿', '每日', '模板']) {
@@ -53,6 +55,7 @@ class Library {
 - 每日/：每天的时间线
 - 会议纪要/、我的分享/、商务洽谈/、现场调研/、听课讲座/、多人群聊/ …：按类别分好的笔记
 - 现场调研/按对象/：同一个调研对象的历次记录
+- 个人感悟/观点库.md：平时说出来的感悟、判断、演讲素材汇在一起，准备演讲时翻这一份
 - 逐字稿/、录音/：全文和原声
 - 模板/：每一类怎么整理。直接改这些 .md，下次整理就按你改过的来
 ''');
@@ -105,6 +108,7 @@ class Library {
     await f.writeAsString(noteMd(s));
     s.d['file'] = f.path;
     if (catKey(s.category) == '现场调研' && s.subject.isNotEmpty) await _appendSubject(s);
+    if (catKey(s.category) == '个人感悟' && s.body.isNotEmpty) await _appendIdeas(s);
     return f.path;
   }
 
@@ -113,6 +117,23 @@ class Library {
     await f.parent.create(recursive: true);
     var t = await f.exists() ? await f.readAsString() : '# 调研对象：${s.subject}\n\n同一个对象的历次调研，新的在后面。\n';
     final block = '<!-- ${s.id} -->\n## ${_day(s.start)} ${_hm(s.start)} ${s.title}\n\n${s.event}\n\n${s.body}\n<!-- /${s.id} -->';
+    final re = RegExp('<!-- ${s.id} -->[\\s\\S]*?<!-- /${s.id} -->');
+    t = re.hasMatch(t) ? t.replaceFirst(re, block) : '${t.trimRight()}\n\n$block\n';
+    await f.writeAsString(t);
+  }
+
+  /// 观点库：每次感悟只收「感悟了什么」「对未来的判断」「演讲素材」三节（没有就收全文），按 id 覆盖。
+  Future<void> _appendIdeas(Scene s) async {
+    final f = ideasFile;
+    await f.parent.create(recursive: true);
+    var t = await f.exists() ? await f.readAsString() : '# 观点库\n\n平时说出来的感悟、对未来的判断、能拿去演讲的素材，新的在后面。\n';
+    final keep = [
+      for (final sec in s.body.split(RegExp(r'^## ', multiLine: true)))
+        if (const ['感悟了什么', '对未来的判断', '演讲素材'].contains(sec.split('\n').first.trim())) '### ${sec.trim()}',
+    ];
+    final body = keep.isEmpty ? s.body.replaceAll(RegExp(r'^## ', multiLine: true), '### ') : keep.join('\n\n');
+    final place = s.place.isEmpty ? '' : ' · ${s.place}';
+    final block = '<!-- ${s.id} -->\n## ${_day(s.start)} ${_hm(s.start)}$place · ${s.title}\n\n$body\n<!-- /${s.id} -->';
     final re = RegExp('<!-- ${s.id} -->[\\s\\S]*?<!-- /${s.id} -->');
     t = re.hasMatch(t) ? t.replaceFirst(re, block) : '${t.trimRight()}\n\n$block\n';
     await f.writeAsString(t);

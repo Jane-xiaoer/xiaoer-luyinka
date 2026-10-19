@@ -88,6 +88,28 @@ void main() {
     expect(out.map((a) => a['text']), ['先打五十台样品']);
   });
 
+  test('个人感悟：单独一类，观点和演讲素材汇进观点库', () async {
+    String? seen;
+    final scenes = await Analyzer(lib, (s, u) async {
+      if (s.contains('"scenes"')) {
+        return '{"scenes":[{"start":"14:00:05","end":"14:19:35","category":"个人感悟","title":"AI 让小团队变强","place":"高铁上"}]}';
+      }
+      seen = s;
+      return '## 触发\n看到新闻\n\n## 感悟了什么\n- **观点**：三个人能干三十个人的活\n\n## 演讲素材\n- 「工具会换，判断力不会」';
+    }).run('x', {'start': '2026-10-18T14:00:05', 'lines': lines});
+    expect(seen, contains('对未来的判断'));
+    final store = Store(Directory('${tmp.path}/app'))..lib = lib;
+    await store.putResult('x', {'start': '2026-10-18T14:00:05', 'lines': lines, 'scenes': scenes});
+    expect(File('${lib.path}/个人感悟/2026-10-18 14.00 AI 让小团队变强.md').existsSync(), isTrue);
+    final ideas = File('${lib.path}/个人感悟/观点库.md').readAsStringSync();
+    expect(ideas, contains('2026-10-18 14:00 · 高铁上 · AI 让小团队变强'));
+    expect(ideas, contains('三个人能干三十个人的活'));
+    expect(ideas, contains('工具会换'));
+    expect(ideas, isNot(contains('看到新闻')));
+    await store.putResult('x', {'start': '2026-10-18T14:00:05', 'lines': lines, 'scenes': scenes}); // 重新整理不重复收
+    expect(RegExp('三个人能干').allMatches(File('${lib.path}/个人感悟/观点库.md').readAsStringSync()).length, 1);
+  });
+
   test('模型给了不认识的类别 / 乱写钟点也不崩', () async {
     final out = await Analyzer(lib, (s, u) async => s.contains('"scenes"')
         ? '好的：{"scenes":[{"start":"乱写","end":"99:99","category":"瞎编类","title":"x"}]}'
