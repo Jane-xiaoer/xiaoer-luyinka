@@ -83,3 +83,29 @@ def test_no_linggan_no_push(home, monkeypatch):
     S.organize("2026-10-18", call=fake_llm)
     assert not list((home / "灵感" / "直连" / "inbox").iterdir())
     assert not list((home / "灵感" / "动作" / "待办").iterdir())
+
+
+MINUTES = {"topic": "老王合作报价", "attendees": ["老王"], "summary": "月费待定，下周三前发合同。",
+           "agenda": [{"title": "报价", "points": ["询问月费"], "conclusion": "未定"}],
+           "decisions": ["下周三前发合同"], "todos": [{"task": "发合同", "owner": "我", "due": "下周三之前"}],
+           "open": ["月费多少"], "next": ""}
+
+
+def test_meeting_scene_gets_minutes(home):
+    sc = S.cut(home / "文字" / "2026-10-18 14.00.00 录音.md", fake_llm)
+    sc[0]["text"] = sc[0]["text"] * 20                  # 够长才出纪要
+    seen = []
+    S.add_minutes(sc, lambda u: seen.append(u) or json.dumps(MINUTES, ensure_ascii=False))
+    assert len(seen) == 1 and "[14:00:05]" in seen[0]    # 只有洽谈那段过了一遍，杂音没有
+    m = sc[0]["minutes"]
+    assert m["todos"][0]["owner"] == "我" and m["agenda"][0]["conclusion"] == "未定"
+    md = S.minutes_md(sc[0])
+    assert md.startswith("# 会议纪要：老王合作报价") and "| 发合同 | 我 | 下周三之前 |" in md
+    assert "## 会议纪要：" in S.scene_md(sc[0]) and "### 讨论内容" in S.scene_md(sc[0])
+
+
+def test_minutes_bad_json_is_skipped(home):
+    sc = S.cut(home / "文字" / "2026-10-18 14.00.00 录音.md", fake_llm)
+    sc[0]["text"] = sc[0]["text"] * 20
+    S.add_minutes(sc, lambda u: "不是 JSON")
+    assert "minutes" not in sc[0]

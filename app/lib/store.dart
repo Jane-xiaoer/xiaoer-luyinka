@@ -31,6 +31,9 @@ class Scene {
   List<Map<String, dynamic>> get actions => pairs('actions');
   List<Map<String, dynamic>> get reminders => pairs('reminders');
   List<List<String>> get text => [for (final x in (d['text'] as List? ?? const [])) List<String>.from(x)];
+  // 开会 / 商业洽谈才有：云端单独整理的标准会议纪要（结构化 + 可直接复制的 Markdown）
+  Map<String, dynamic>? get minutes => d['minutes'] == null ? null : Map<String, dynamic>.from(d['minutes']);
+  String get minutesMd => d['minutes_md'] ?? '';
   bool get noise => category == '杂音';
   int get todo => actions.length + reminders.length;
   String get dayKey => d['start'].toString().substring(0, 10);

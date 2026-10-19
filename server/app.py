@@ -144,9 +144,13 @@ def process(token: str, dev: str, rid: str) -> None:
         lines = [[scenes._clock(scenes.recording_start(md), sec), text] for sec, text in scenes.load_lines(md)]
         set_status(d, progress=85)
         cut = scenes.cut(md) if lines else []
+        set_status(d, progress=92)
+        scenes.add_minutes(cut)                              # 开会 / 洽谈 → 再出一份标准纪要
     for s in cut:
         s.pop("audio", None)
         s.pop("card", None)
+        if s.get("minutes"):
+            s["minutes_md"] = scenes.minutes_md(s)
     start = scenes.recording_start(md).isoformat(timespec="seconds") if scenes._NAME.search(title) else ""
     write_json(d / "result.json", {"recording": title, "start": start, "seconds": round(seconds, 1),
                                    "lines": lines, "scenes": cut})

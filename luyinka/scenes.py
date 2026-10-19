@@ -110,9 +110,9 @@ def windows(lines: list[tuple[float, str]], limit: int = WINDOW_CHARS) -> list[l
 
 # ───────── 模型 ─────────
 
-def call_llm(user: str, timeout: int = 900) -> str:
+def call_llm(user: str, timeout: int = 900, system: str = SYSTEM) -> str:
     body = {"model": LLM_MODEL, "temperature": 0.2,
-            "messages": [{"role": "system", "content": SYSTEM}, {"role": "user", "content": user}]}
+            "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
     req = urllib.request.Request(LLM_URL.rstrip("/") + "/chat/completions", data=json.dumps(body).encode(),
                                  headers={"Content-Type": "application/json",
                                           "Authorization": "Bearer " + (LLM.get("api_key") or "x")})
@@ -183,6 +183,95 @@ def cut(md: Path, call=call_llm) -> list[dict]:
     return out
 
 
+# ───────── 会议纪要：开会 / 商业洽谈的场景再单独过一遍，出一份标准纪要 ─────────
+
+MEETING = {"开会", "商业洽谈"}
+MINUTES_CHARS = 40000   # 一场会最多喂这么多字（约 2 小时），再长只取前面
+
+MINUTES_SYSTEM = """/no_think
+你是资深的会议秘书。下面是一场会（或一次商务洽谈）的录音转写，每行开头是钟点。
+转写没有区分谁在说话，会有错字（人名、品牌名尤其多），按上下文理解。请整理成一份可以直接发给参会人的标准会议纪要。
+
+要求：
+- topic：会议主题，8–20 字，说清这场会要解决什么
+- attendees：录音里出现的人名（在场的、被提到的都算），原样写；没有就空数组
+- summary：会议概要，2–4 句，先说结论、再说背景
+- agenda：按议题分组（按讨论顺序，通常 2–6 个）。每个议题：
+  - title：议题名
+  - points：讨论要点 2–6 条，写清「谁（说不清就不写谁）提出了什么 / 有什么分歧 / 依据的数字」，书面语、去掉口水话，但事实、数字、日期照原话
+  - conclusion：这个议题的结论；没谈出结论就写「未定」
+- decisions：全场明确拍板的决定，每条一句；没有就空数组
+- todos：待办，{"task":"做什么（动词开头）","owner":"谁负责，说不清留空","due":"截止时间，原话照抄，没说留空"}
+- open：没解决、需要下次再议或待确认的问题
+- next：下次会议的时间 / 安排，原话；没说留空
+
+铁律：只写转写里有的，不编、不推测、不补常识。数字和日期拿不准就照原话抄。宁可少写，不可写错。
+
+只输出 JSON，不要别的字：
+{"topic":"","attendees":[],"summary":"","agenda":[{"title":"","points":[],"conclusion":""}],"decisions":[],"todos":[{"task":"","owner":"","due":""}],"open":[],"next":""}"""
+
+
+def call_minutes(user: str) -> str:
+    return call_llm(user, system=MINUTES_SYSTEM)
+
+
+def minutes_of(sc: dict, call=call_minutes) -> dict | None:
+    """一个开会 / 洽谈场景 → 标准纪要（结构化）；模型给不出就返回 None，不影响场景本身。"""
+    user = "\n".join(f"[{t}] {text}" for t, text in sc["text"])[:MINUTES_CHARS]
+    if len(user) < 200:                       # 太短的不算会，不出纪要
+        return None
+    try:
+        raw = re.sub(r"<think>.*?</think>", "", call(user), flags=re.S)
+        j = json.loads(re.search(r"\{.*\}", raw, flags=re.S).group(0))
+    except Exception as e:  # noqa: BLE001
+        log.warning("纪要没出来 %s：%s", sc.get("id"), e)
+        return None
+    agenda = [{"title": str(a.get("title") or "").strip(), "points": _strs(a.get("points")),
+               "conclusion": str(a.get("conclusion") or "").strip()}
+              for a in j.get("agenda") or [] if isinstance(a, dict) and (a.get("title") or a.get("points"))]
+    todos = [{"task": str(t.get("task") or "").strip(), "owner": str(t.get("owner") or "").strip(),
+              "due": str(t.get("due") or "").strip()}
+             for t in j.get("todos") or [] if isinstance(t, dict) and str(t.get("task") or "").strip()]
+    return {"topic": str(j.get("topic") or sc["title"]).strip(), "attendees": _strs(j.get("attendees")),
+            "summary": str(j.get("summary") or "").strip(), "agenda": agenda,
+            "decisions": _strs(j.get("decisions")), "todos": todos, "open": _strs(j.get("open")),
+            "next": str(j.get("next") or "").strip()}
+
+
+def add_minutes(scenes: list[dict], call=call_minutes) -> None:
+    for sc in scenes:
+        if sc["category"] in MEETING and "minutes" not in sc and (m := minutes_of(sc, call)):
+            sc["minutes"] = m
+
+
+def minutes_md(sc: dict, h: str = "#") -> str:
+    """纪要 → 可以直接复制发出去的 Markdown（h = 标题级别，嵌进场景卡时用 ##）。"""
+    m, h2, h3 = sc["minutes"], h + "#", h + "##"
+    out = [f"{h} 会议纪要：{m['topic']}", "",
+           f"**时间** {sc['start'][:10]} {sc['start'][11:16]}–{sc['end'][11:16]}（{_dur(sc)}）"
+           + (f"　**地点** {sc['place']}" if sc.get("place") else "")]
+    if m["attendees"]:
+        out.append(f"**相关人** {'、'.join(m['attendees'])}")
+    if m["summary"]:
+        out += ["", f"{h2} 会议概要", "", m["summary"]]
+    if m["agenda"]:
+        out += ["", f"{h2} 讨论内容"]
+        for i, a in enumerate(m["agenda"], 1):
+            out += ["", f"{h3} {i}. {a['title']}", ""] + [f"- {x}" for x in a["points"]]
+            if a["conclusion"]:
+                out.append(f"- **结论**：{a['conclusion']}")
+    if m["decisions"]:
+        out += ["", f"{h2} 决议", ""] + [f"{i}. {x}" for i, x in enumerate(m["decisions"], 1)]
+    if m["todos"]:
+        out += ["", f"{h2} 待办", "", "| 事项 | 负责人 | 截止 |", "|---|---|---|"]
+        out += [f"| {t['task']} | {t['owner'] or '—'} | {t['due'] or '—'} |" for t in m["todos"]]
+    if m["open"]:
+        out += ["", f"{h2} 待定问题", ""] + [f"- {x}" for x in m["open"]]
+    if m["next"]:
+        out += ["", f"**下次会议** {m['next']}"]
+    return "\n".join(out) + "\n"
+
+
 def _strs(xs) -> list[str]:
     return [str(x).strip() for x in (xs or []) if str(x).strip()] if isinstance(xs, list) else []
 
@@ -237,6 +326,8 @@ def scene_md(sc: dict) -> str:
     if sc["reminders"]:
         lines += ["## 提醒事项", ""] + [f"- [{x['t']}] {x['text']}" + (f"（{x['when']}）" if x.get("when") else "")
                                     for x in sc["reminders"]] + [""]
+    if sc.get("minutes"):
+        lines += [minutes_md(sc, "##"), ""]
     lines += ["## 内容详情", ""] + [f"**[{t}]** {text}" for t, text in sc["text"]]
     return "\n".join(lines) + "\n"
 
@@ -318,7 +409,7 @@ def run_hook(day: str) -> None:
         log.warning("agent 命令退出码 %s，详情看 %s", r.returncode, logf)
 
 
-def organize(day: str, push: bool = True, call=call_llm) -> dict:
+def organize(day: str, push: bool = True, call=call_llm, minutes_call=call_minutes) -> dict:
     """整理某一天：只切还没切过的录音，已有的场景和已送出的条目不动。
     push：送小耳灵感 / 推飞书（只在 linggan.enabled 时）+ 跑 after_organize 钩子。"""
     folder = SCENE_DIR / day
@@ -330,6 +421,7 @@ def organize(day: str, push: bool = True, call=call_llm) -> dict:
             continue
         log.info("切场景 %s", md.stem)
         scenes = cut(md, call)
+        add_minutes(scenes, minutes_call)
         for sc in scenes:
             sc["card"] = str(folder / f"{_hm(sc['start']).replace(':', '')} {_SAFE.sub('', sc['title']) or '场景'}.md")
         db["scenes"] += scenes

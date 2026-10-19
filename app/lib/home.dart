@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'cards.dart';
 import 'cloud.dart';
@@ -628,6 +629,7 @@ class SceneDetail extends StatelessWidget {
       const SizedBox(height: 8),
       SelectableText(s.event, style: const TextStyle(fontSize: 15, height: 1.7)),
       const SizedBox(height: 16),
+      if (s.minutes != null) ...[Minutes(scene: s), const SizedBox(height: 12)],
       LayoutBuilder(builder: (_, c) {
         final boxes = [
           if (s.valuable.isNotEmpty || s.views.isNotEmpty)
@@ -688,6 +690,95 @@ class SceneDetail extends StatelessWidget {
         ]),
       ),
     ]);
+  }
+}
+
+// ───────── 会议纪要（开会 / 商业洽谈） ─────────
+
+class Minutes extends StatelessWidget {
+  final Scene scene;
+  const Minutes({super.key, required this.scene});
+
+  static const _body = TextStyle(fontSize: 14, height: 1.7);
+
+  Widget _head(String t) => Padding(
+        padding: const EdgeInsets.only(top: 14, bottom: 6),
+        child: Text(t, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: K.mute, letterSpacing: 1)),
+      );
+
+  Widget _li(String lead, String x, {Color color = K.ink}) => Padding(
+        padding: const EdgeInsets.only(bottom: 4),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          SizedBox(width: 22, child: Text(lead, style: TextStyle(fontSize: 14, height: 1.7, color: color))),
+          Expanded(child: SelectableText(x, style: _body)),
+        ]),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final m = scene.minutes!;
+    List<String> strs(String k) => List<String>.from(m[k] ?? const []);
+    final agenda = List<Map<String, dynamic>>.from((m['agenda'] as List? ?? const []).map((x) => Map<String, dynamic>.from(x)));
+    final todos = List<Map<String, dynamic>>.from((m['todos'] as List? ?? const []).map((x) => Map<String, dynamic>.from(x)));
+    return Container(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+      decoration: BoxDecoration(
+        color: K.card,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: K.accentEdge),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Label('会议纪要', color: K.accent),
+          const Spacer(),
+          if (scene.minutesMd.isNotEmpty)
+            TextButton.icon(
+              onPressed: () async {
+                await Clipboard.setData(ClipboardData(text: scene.minutesMd));
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('纪要已复制，可以直接粘到微信 / 飞书')));
+                }
+              },
+              icon: const Icon(Icons.copy_rounded, size: 16),
+              label: const Text('复制纪要'),
+              style: TextButton.styleFrom(foregroundColor: K.accent),
+            ),
+        ]),
+        const SizedBox(height: 4),
+        SelectableText((m['topic'] ?? '').toString(), style: K.title(19).copyWith(color: K.ink)),
+        if (strs('attendees').isNotEmpty) ...[
+          const SizedBox(height: 4),
+          Text('相关人：${strs('attendees').join('、')}', style: const TextStyle(fontSize: 13, color: K.faint)),
+        ],
+        if ((m['summary'] ?? '').toString().isNotEmpty) ...[_head('概要'), SelectableText(m['summary'], style: _body)],
+        if (agenda.isNotEmpty) ...[
+          _head('讨论内容'),
+          for (final (i, a) in agenda.indexed) ...[
+            Padding(
+              padding: EdgeInsets.only(top: i == 0 ? 0 : 8, bottom: 2),
+              child: Text('${i + 1}. ${a['title']}', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: K.ink)),
+            ),
+            for (final x in List<String>.from(a['points'] ?? const [])) _li('·', x, color: K.accent),
+            if ((a['conclusion'] ?? '').toString().isNotEmpty) _li('→', '结论：${a['conclusion']}', color: K.accent),
+          ],
+        ],
+        if (strs('decisions').isNotEmpty) ...[
+          _head('决议'),
+          for (final (i, x) in strs('decisions').indexed) _li('${i + 1}.', x, color: K.accent),
+        ],
+        if (todos.isNotEmpty) ...[
+          _head('待办'),
+          for (final t in todos)
+            _li('☐', [
+              t['task'],
+              if ((t['owner'] ?? '').toString().isNotEmpty) '负责：${t['owner']}',
+              if ((t['due'] ?? '').toString().isNotEmpty) '截止：${t['due']}',
+            ].join(' · '), color: K.todo),
+        ],
+        if (strs('open').isNotEmpty) ...[_head('待定问题'), for (final x in strs('open')) _li('?', x, color: K.faint)],
+        if ((m['next'] ?? '').toString().isNotEmpty) ...[_head('下次会议'), SelectableText(m['next'], style: _body)],
+      ]),
+    );
   }
 }
 

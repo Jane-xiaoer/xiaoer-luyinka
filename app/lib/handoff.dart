@@ -42,6 +42,9 @@ String dayMarkdown(String day, List<Scene> scenes, {bool fullText = true}) {
     list('值得记住的', s.memorable.map((m) => '[${m['t']}] ${m['text']}'));
     list('下一步行动', s.actions.map((a) => '${a['text']}${(a['who'] ?? '') != '' ? '（${a['who']}）' : ''}'));
     list('提醒事项', s.reminders.map((r) => '${r['text']}${(r['when'] ?? '') != '' ? '（${r['when']}）' : ''}'));
+    if (s.minutesMd.isNotEmpty) {
+      b.writeln('\n${s.minutesMd.replaceAllMapped(RegExp(r'^(#+) ', multiLine: true), (m) => '##${m[1]} ')}');
+    }
     if (fullText && s.text.isNotEmpty) {
       b.writeln('\n<details><summary>逐字稿</summary>\n');
       for (final l in s.text) {
