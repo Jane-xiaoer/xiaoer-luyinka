@@ -36,11 +36,13 @@ class Llm {
 
   String get label => own ? '自己的模型 · ${settings()['model']}' : '小耳提供';
 
-  Future<String> chat(String system, String user, {double temperature = 0.2}) async {
-    final messages = [
-      {'role': 'system', 'content': system},
-      {'role': 'user', 'content': user},
-    ];
+  Future<String> chat(String system, String user, {double temperature = 0.2}) => chatMessages([
+        {'role': 'system', 'content': system},
+        {'role': 'user', 'content': user},
+      ], temperature: temperature);
+
+  /// 多轮：system + 前面几轮 user / assistant + 这次的 user。
+  Future<String> chatMessages(List<Map<String, String>> messages, {double temperature = 0.2}) async {
     final out = own ? await _direct(messages, temperature) : await _relay(messages, temperature);
     return out.replaceAll(RegExp(r'<think>[\s\S]*?</think>'), '').trim();
   }

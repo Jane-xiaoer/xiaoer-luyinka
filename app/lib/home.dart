@@ -1,5 +1,4 @@
 // 主界面（方向 A · 今天时间线）：宽屏三栏 = 日子 / 当天时间线 + 问答 / 场景详情 + 播放条；手机 = 当天列表 → 点进详情。
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:audioplayers/audioplayers.dart';
@@ -7,9 +6,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'analyze.dart';
+import 'ask.dart';
 import 'cards.dart';
 import 'handoff.dart';
-import 'library.dart';
 import 'llm.dart';
 import 'md_view.dart';
 import 'settings.dart';
@@ -512,11 +511,13 @@ class DayColumn extends StatelessWidget {
         ]),
       ),
       Expanded(
-        child: ListView(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6), children: [
-          for (final s in scenes) SceneRow(scene: s, selected: s.id == selected, onTap: () => onPick(s)),
-        ]),
+        child: AskBox(
+          store: store, scenes: scenes, topic: 'day:$day', focus: _focus(scenes, selected),
+          child: ListView(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6), children: [
+            for (final s in scenes) SceneRow(scene: s, selected: s.id == selected, onTap: () => onPick(s)),
+          ]),
+        ),
       ),
-      AskBox(store: store, scenes: scenes),
     ]);
   }
 }
@@ -563,27 +564,32 @@ class CatColumn extends StatelessWidget {
         ]),
       ),
       Expanded(
-        child: ListView(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6), children: [
-          for (final g in groups.entries) ...[
-            Padding(
-              padding: const EdgeInsets.fromLTRB(8, 10, 8, 6),
-              child: Row(children: [
-                Text(bySubject ? g.key : dayTitle(g.key, short: true),
-                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: K.mute)),
-                const SizedBox(width: 8),
-                if (bySubject) Text('${g.value.length} 次', style: const TextStyle(fontSize: 12, color: K.faint)),
-                const SizedBox(width: 8),
-                const Expanded(child: Divider(color: K.line)),
-              ]),
-            ),
-            for (final s in g.value) SceneRow(scene: s, selected: s.id == selected, onTap: () => onPick(s), showDate: bySubject),
-          ],
-        ]),
+        child: AskBox(
+          store: store, scenes: scenes, topic: 'cat:$cat', focus: _focus(scenes, selected),
+          hint: '问问小耳：这些${catFolder(cat!)}里…也可以让它写东西',
+          child: ListView(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6), children: [
+            for (final g in groups.entries) ...[
+              Padding(
+                padding: const EdgeInsets.fromLTRB(8, 10, 8, 6),
+                child: Row(children: [
+                  Text(bySubject ? g.key : dayTitle(g.key, short: true),
+                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: K.mute)),
+                  const SizedBox(width: 8),
+                  if (bySubject) Text('${g.value.length} 次', style: const TextStyle(fontSize: 12, color: K.faint)),
+                  const SizedBox(width: 8),
+                  const Expanded(child: Divider(color: K.line)),
+                ]),
+              ),
+              for (final s in g.value) SceneRow(scene: s, selected: s.id == selected, onTap: () => onPick(s), showDate: bySubject),
+            ],
+          ]),
+        ),
       ),
-      AskBox(store: store, scenes: scenes, hint: '问问小耳：这些${catFolder(cat!)}里…'),
     ]);
   }
 }
+
+Scene? _focus(List<Scene> scenes, String? id) => id == null ? null : scenes.where((s) => s.id == id).firstOrNull;
 
 class SceneRow extends StatelessWidget {
   final Scene scene;
@@ -669,90 +675,246 @@ class Hint extends StatelessWidget {
       );
 }
 
+/// 「问问小耳」：底部输入框 + 上方展开的对话区（盖在列表上面，能收起）。
+/// 能连续追问；正在看的那段（[focus]）优先交给模型；换天 / 换类别（[topic] 变了）对话清空。
 class AskBox extends StatefulWidget {
   final Store store;
   final List<Scene> scenes;
+  final Scene? focus;
+  final String topic;
   final String hint;
-  const AskBox({super.key, required this.store, required this.scenes, this.hint = '问问小耳：这天我答应了谁什么？'});
+  final Widget child; // 平时显示的列表
+  const AskBox(
+      {super.key, required this.store, required this.scenes, required this.topic, required this.child, this.focus,
+      this.hint = '问问小耳：这天我答应了谁什么？也可以让它写东西'});
   @override
   State<AskBox> createState() => _AskBoxState();
 }
 
+class _Msg {
+  final bool me, error;
+  final String text;
+  const _Msg(this.me, this.text, {this.error = false});
+}
+
 class _AskBoxState extends State<AskBox> {
   final _q = TextEditingController();
-  bool _busy = false;
+  final _scroll = ScrollController();
+  final _msgs = <_Msg>[];
+  bool _busy = false, _open = false;
+  int _gen = 0; // 清空 / 换了资料后，路上的回答作废
+
+  @override
+  void didUpdateWidget(AskBox old) {
+    super.didUpdateWidget(old);
+    if (old.topic != widget.topic) _clear();
+  }
+
+  @override
+  void dispose() {
+    _q.dispose();
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  void _clear() {
+    _gen++;
+    _msgs.clear();
+    _busy = false;
+    _open = false;
+  }
+
+  List<Turn> get _history => [
+        for (var i = 0; i + 1 < _msgs.length; i++)
+          if (_msgs[i].me && !_msgs[i + 1].me && !_msgs[i + 1].error) Turn(_msgs[i].text, _msgs[i + 1].text),
+      ];
+
+  void _toBottom() => WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_scroll.hasClients) {
+          _scroll.animateTo(_scroll.position.maxScrollExtent, duration: const Duration(milliseconds: 220), curve: Curves.easeOut);
+        }
+      });
 
   Future<void> _ask() async {
     final q = _q.text.trim();
     if (q.isEmpty || _busy) return;
-    setState(() => _busy = true);
-    String answer;
+    final messages = buildAskMessages(scenes: widget.scenes, focus: widget.focus, history: _history, question: q);
+    final gen = _gen;
+    setState(() {
+      _msgs.add(_Msg(true, q));
+      _busy = true;
+      _open = true;
+      _q.clear();
+    });
+    _toBottom();
+    _Msg answer;
     try {
-      // 问当天 / 这一类：整理好的笔记优先，再给逐字稿，截到 6 万字；找不到的，模型会说没找到
-      final ctx = [
-        for (final s in widget.scenes)
-          {
-            'time': '${s.d['start']}–${s.d['end'].toString().substring(11, 16)}', 'category': s.category, 'title': s.title,
-            'event': s.event, 'place': s.place, 'people': s.people, if (s.subject.isNotEmpty) 'subject': s.subject,
-            'note': s.body.isNotEmpty ? s.body : legacyBody(s), 'actions': s.actions, 'reminders': s.reminders,
-          },
-      ];
-      var json = jsonEncode(ctx);
-      if (json.length < 40000) {
-        json = jsonEncode([for (final (i, s) in widget.scenes.indexed) {...ctx[i], 'text': s.text}]);
-      }
-      answer = await Llm.instance!.chat(askPrompt,
-          '## 我的录音记录\n${json.length > 60000 ? json.substring(0, 60000) : json}\n\n## 我的问题\n$q', temperature: 0.3);
+      final a = await Llm.instance!.chatMessages(messages, temperature: 0.5);
+      answer = a.isEmpty ? const _Msg(false, '模型没回内容，再问一次试试。', error: true) : _Msg(false, a);
     } catch (e) {
-      answer = '没问成：$e';
+      answer = _Msg(false, '没问成：$e', error: true);
     }
-    if (!mounted) return;
-    setState(() => _busy = false);
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        backgroundColor: K.card,
-        title: Row(children: [
-          const Mascot('wave', size: 52),
-          const SizedBox(width: 12),
-          Expanded(child: Text(q, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600))),
-        ]),
-        content: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 520),
-            child: SelectableText(answer, style: const TextStyle(fontSize: 15, height: 1.7))),
-        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('好'))],
-      ),
+    if (!mounted || gen != _gen) return;
+    setState(() {
+      _msgs.add(answer);
+      _busy = false;
+    });
+    _toBottom();
+  }
+
+  Future<void> _copy(String md) async {
+    await Clipboard.setData(ClipboardData(text: md));
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已复制'), duration: Duration(seconds: 2)));
+  }
+
+  Widget _bubble(_Msg m) {
+    if (m.me) {
+      return Align(
+        alignment: Alignment.centerRight,
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 420),
+          margin: const EdgeInsets.only(left: 48, bottom: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+          decoration: BoxDecoration(color: K.accentSoft, borderRadius: BorderRadius.circular(14)),
+          child: SelectableText(m.text, style: const TextStyle(fontSize: 14.5, height: 1.6, color: K.ink)),
+        ),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Mascot(m.error ? 'sleep' : 'wave', size: 30),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(14, 10, 8, 4),
+            decoration: BoxDecoration(
+                color: m.error ? K.todoBg : K.cardDeep, borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: m.error ? K.todoSoft : K.line)),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              if (m.error)
+                Padding(
+                  padding: const EdgeInsets.only(right: 6, bottom: 8),
+                  child: SelectableText(m.text, style: const TextStyle(fontSize: 14, height: 1.6, color: K.todo)),
+                )
+              else
+                Padding(padding: const EdgeInsets.only(right: 6), child: MdView(m.text)),
+              if (!m.error)
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton.icon(
+                    style: TextButton.styleFrom(foregroundColor: K.mute, visualDensity: VisualDensity.compact),
+                    onPressed: () => _copy(m.text),
+                    icon: const Icon(Icons.copy_rounded, size: 15),
+                    label: const Text('拷贝', style: TextStyle(fontSize: 12.5)),
+                  ),
+                ),
+            ]),
+          ),
+        ),
+      ]),
     );
   }
 
-  @override
-  Widget build(BuildContext context) => Container(
-        margin: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-        padding: const EdgeInsets.fromLTRB(8, 5, 5, 5),
-        decoration: BoxDecoration(
-            color: K.card, borderRadius: BorderRadius.circular(16), border: Border.all(color: K.lineStrong),
-            boxShadow: const [BoxShadow(color: Color(0x0F000000), blurRadius: 12, offset: Offset(0, 3))]),
-        child: Row(children: [
-          const Mascot('stand', size: 30),
-          const SizedBox(width: 8),
-          Expanded(
-            child: TextField(
-              controller: _q,
-              onSubmitted: (_) => _ask(),
-              decoration: InputDecoration(hintText: widget.hint),
-            ),
+  Widget _panel() => Container(
+        color: K.card,
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 4, 10, 4),
+            child: Row(children: [
+              const Text('和小耳的对话', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: K.mute)),
+              if (widget.focus != null) ...[
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text('正在看：${widget.focus!.title}', overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 12, color: K.faint)),
+                ),
+              ],
+              const Spacer(),
+              TextButton(
+                style: TextButton.styleFrom(foregroundColor: K.mute, visualDensity: VisualDensity.compact),
+                onPressed: () => setState(_clear),
+                child: const Text('清空，重新开始', style: TextStyle(fontSize: 12.5)),
+              ),
+              TextButton.icon(
+                style: TextButton.styleFrom(foregroundColor: K.accent, visualDensity: VisualDensity.compact),
+                onPressed: () => setState(() => _open = false),
+                icon: const Icon(Icons.expand_more, size: 18),
+                label: const Text('收起', style: TextStyle(fontSize: 12.5)),
+              ),
+            ]),
           ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: K.accent, minimumSize: const Size(56, 40)),
-            onPressed: _busy ? null : _ask,
-            child: _busy
-                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                : const Text('问'),
+          const Divider(height: 1, color: K.line),
+          Expanded(
+            child: ListView(controller: _scroll, padding: const EdgeInsets.fromLTRB(18, 14, 18, 6), children: [
+              for (final m in _msgs) _bubble(m),
+              if (_busy)
+                const Padding(
+                  padding: EdgeInsets.only(bottom: 14),
+                  child: Row(children: [
+                    Mascot('stand', size: 30),
+                    SizedBox(width: 10),
+                    SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: K.accent)),
+                    SizedBox(width: 8),
+                    Text('小耳在写…', style: TextStyle(fontSize: 13.5, color: K.mute)),
+                  ]),
+                ),
+            ]),
           ),
         ]),
       );
-}
 
+  @override
+  Widget build(BuildContext context) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Expanded(
+          child: Stack(children: [
+            Positioned.fill(child: widget.child),
+            if (_open && _msgs.isNotEmpty) Positioned.fill(child: _panel()),
+          ]),
+        ),
+        if (!_open && _msgs.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                style: TextButton.styleFrom(foregroundColor: K.accent, visualDensity: VisualDensity.compact),
+                onPressed: () {
+                  setState(() => _open = true);
+                  _toBottom();
+                },
+                icon: const Icon(Icons.expand_less, size: 18),
+                label: Text('${_busy ? '小耳在写… ' : ''}展开对话（${_history.length} 轮）', style: const TextStyle(fontSize: 12.5)),
+              ),
+            ),
+          ),
+        Container(
+          margin: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+          padding: const EdgeInsets.fromLTRB(8, 5, 5, 5),
+          decoration: BoxDecoration(
+              color: K.card, borderRadius: BorderRadius.circular(16), border: Border.all(color: K.lineStrong),
+              boxShadow: const [BoxShadow(color: Color(0x0F000000), blurRadius: 12, offset: Offset(0, 3))]),
+          child: Row(children: [
+            const Mascot('stand', size: 30),
+            const SizedBox(width: 8),
+            Expanded(
+              child: TextField(
+                controller: _q,
+                onSubmitted: (_) => _ask(),
+                decoration: InputDecoration(hintText: _msgs.isEmpty ? widget.hint : '接着问，或者让小耳改一改…'),
+              ),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: K.accent, minimumSize: const Size(56, 40)),
+              onPressed: _busy ? null : _ask,
+              child: _busy
+                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  : const Text('问'),
+            ),
+          ]),
+        ),
+      ]);
+}
 // ───────── 右栏：场景详情 ─────────
 
 int _secs(String clock) {
