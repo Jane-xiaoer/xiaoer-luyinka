@@ -156,7 +156,8 @@ class Label extends StatelessWidget {
     (Color(0xFFEBE2EE), Color(0xFF6A4C78)), // 浅紫
     (Color(0xFFE2EBE0), Color(0xFF3F6B4A)), // 薄荷
   ];
-  const fixed = {'自言自语': 0, '与人对话': 1, '打电话': 1, '商业洽谈': 2, '开会': 2, '学习听课': 3, '嘉宾分享': 4, '生活日常': 5};
+  const fixed = {'开会': 2, '我的分享': 1, '商务洽谈': 4, '现场调研': 3, '听课讲座': 5, '多人群聊': 1, '打电话': 3, '自言自语': 0,
+      '生活日常': 5, '商业洽谈': 4, '学习听课': 5, '嘉宾分享': 5, '与人对话': 1};
   return palette[fixed[c] ?? (c.codeUnits.fold<int>(0, (a, b) => a + b) % palette.length)];
 }
 

@@ -1,16 +1,21 @@
 // 主界面（方向 A · 今天时间线）：宽屏三栏 = 日子 / 当天时间线 + 问答 / 场景详情 + 播放条；手机 = 当天列表 → 点进详情。
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'analyze.dart';
 import 'cards.dart';
-import 'cloud.dart';
 import 'handoff.dart';
+import 'library.dart';
+import 'llm.dart';
+import 'md_view.dart';
 import 'settings.dart';
 import 'store.dart';
 import 'sync.dart';
+import 'templates.dart';
 import 'theme.dart';
 
 class Home extends StatefulWidget {
@@ -24,6 +29,8 @@ class Home extends StatefulWidget {
 class _HomeState extends State<Home> {
   String? _day;
   String? _sceneId;
+  bool _byCat = false; // 按天看 / 按类别看
+  String? _cat;
   final player = Player();
 
   Store get store => widget.store;
@@ -54,7 +61,13 @@ class _HomeState extends State<Home> {
     return days.isEmpty ? null : days.keys.first;
   }
 
-  List<Scene> get scenes => day == null ? [] : store.days[day]!;
+  String? get cat {
+    final c = store.byCategory;
+    if (_cat != null && c.containsKey(_cat)) return _cat;
+    return c.isEmpty ? null : c.keys.first;
+  }
+
+  List<Scene> get scenes => _byCat ? (cat == null ? [] : store.byCategory[cat]!) : (day == null ? [] : store.days[day]!);
 
   Scene? get scene {
     final l = scenes;
@@ -66,6 +79,16 @@ class _HomeState extends State<Home> {
 
   void pickDay(String d) => setState(() {
         _day = d;
+        _sceneId = null;
+      });
+
+  void pickCat(String c) => setState(() {
+        _cat = c;
+        _sceneId = null;
+      });
+
+  void setMode(bool byCat) => setState(() {
+        _byCat = byCat;
         _sceneId = null;
       });
 
@@ -89,7 +112,11 @@ class _HomeState extends State<Home> {
   }
 
   Widget _wide() => Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        SizedBox(width: 228, child: Sidebar(store: store, syncer: widget.syncer, day: day, onPick: pickDay)),
+        SizedBox(
+            width: 228,
+            child: Sidebar(
+                store: store, syncer: widget.syncer, day: day, onPick: pickDay,
+                byCat: _byCat, cat: cat, onPickCat: pickCat, onMode: setMode)),
         Expanded(child: Container(
           margin: const EdgeInsets.fromLTRB(0, 12, 12, 12),
           clipBehavior: Clip.antiAlias,
@@ -101,9 +128,12 @@ class _HomeState extends State<Home> {
           child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         SizedBox(
           width: (MediaQuery.sizeOf(context).width * 0.36).clamp(360, 470).toDouble(),
-          child: DayColumn(
-              store: store, day: day, scenes: scenes, selected: scene?.id, onHandoff: _handoff,
-              onPick: (s) => setState(() => _sceneId = s.id)),
+          child: _byCat
+              ? CatColumn(store: store, cat: cat, scenes: scenes, selected: scene?.id,
+                  onPick: (s) => setState(() => _sceneId = s.id), top: 34)
+              : DayColumn(
+                  store: store, day: day, scenes: scenes, selected: scene?.id, onHandoff: _handoff,
+                  onPick: (s) => setState(() => _sceneId = s.id)),
         ),
         const VerticalDivider(width: 1, color: K.line),
         Expanded(
@@ -115,21 +145,36 @@ class _HomeState extends State<Home> {
       ]);
 
   Widget _narrow() => Column(children: [
-        if (store.days.length > 1)
+        if (store.days.isNotEmpty)
           SizedBox(
             height: 48,
             child: ListView(scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: 12), children: [
-              for (final d in store.days.keys)
-                Padding(
-                  padding: const EdgeInsets.only(right: 8, top: 6, bottom: 6),
-                  child: ChoiceChip(label: Text(dayTitle(d, short: true)), selected: d == day, onSelected: (_) => pickDay(d)),
-                ),
+              Padding(
+                padding: const EdgeInsets.only(right: 10, top: 6, bottom: 6),
+                child: ModeSwitch(byCat: _byCat, onMode: setMode, compact: true),
+              ),
+              if (_byCat)
+                for (final e in store.byCategory.entries)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8, top: 6, bottom: 6),
+                    child: ChoiceChip(label: Text('${catFolder(e.key)} ${e.value.length}'), selected: e.key == cat, onSelected: (_) => pickCat(e.key)),
+                  )
+              else
+                for (final d in store.days.keys)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8, top: 6, bottom: 6),
+                    child: ChoiceChip(label: Text(dayTitle(d, short: true)), selected: d == day, onSelected: (_) => pickDay(d)),
+                  ),
             ]),
           ),
         Expanded(
-          child: DayColumn(
-            store: store, day: day, scenes: scenes, selected: null,
-            onPick: (s) => Navigator.of(context).push(MaterialPageRoute(
+          child: _byCat
+              ? CatColumn(store: store, cat: cat, scenes: scenes, selected: null, onPick: _openNarrow)
+              : DayColumn(store: store, day: day, scenes: scenes, selected: null, onPick: _openNarrow),
+        ),
+      ]);
+
+  void _openNarrow(Scene s) => Navigator.of(context).push(MaterialPageRoute(
                 builder: (_) => Scaffold(
                       appBar: AppBar(backgroundColor: K.paper, title: Text(s.title)),
                       body: Column(children: [
@@ -138,10 +183,7 @@ class _HomeState extends State<Home> {
                             listenable: player,
                             builder: (_, _) => player.stem == null ? const SizedBox() : PlayerBar(player: player)),
                       ]),
-                    ))),
-          ),
-        ),
-      ]);
+                    )));
 }
 
 // ───────── 卡的状态（左栏卡片 / 手机顶栏共用）─────────
@@ -157,7 +199,11 @@ class _HomeState extends State<Home> {
     return (title, '正在拉录音 ${r.size > 0 ? (r.got * 100 ~/ r.size) : 0}%');
   }
   final working = pend.where((r) => ['pulled', 'uploading', 'processing'].contains(r.stage)).length;
-  if (working > 0) return (title, '云端整理中 · $working 段');
+  if (working > 0) return (title, '云端转写中 · $working 段');
+  final analyzing = pend.where((r) => r.stage == 'analyzing').toList();
+  if (analyzing.isNotEmpty) return (title, '正在按类别整理 ${analyzing.first.progress}%');
+  final waiting = pend.where((r) => r.stage == 'transcribed').toList();
+  if (waiting.isNotEmpty) return (title, waiting.first.error ?? '等着整理 · ${waiting.length} 段');
   if (c.connected) {
     final b = c.info?.battery;
     return (title, '已连接${b == null ? '' : ' · ${c.info!.charging ? '充电中' : '电量 $b%'}'}');
@@ -227,9 +273,13 @@ class HandoffButton extends StatelessWidget {
 class Sidebar extends StatelessWidget {
   final Store store;
   final Syncer syncer;
-  final String? day;
-  final void Function(String) onPick;
-  const Sidebar({super.key, required this.store, required this.syncer, required this.day, required this.onPick});
+  final String? day, cat;
+  final bool byCat;
+  final void Function(String) onPick, onPickCat;
+  final void Function(bool) onMode;
+  const Sidebar(
+      {super.key, required this.store, required this.syncer, required this.day, required this.onPick,
+      required this.byCat, required this.cat, required this.onPickCat, required this.onMode});
 
   @override
   Widget build(BuildContext context) => Container(
@@ -244,14 +294,86 @@ class Sidebar extends StatelessWidget {
               Text('小耳录音卡', style: K.title(18).copyWith(color: K.ink)),
             ]),
           ),
-          const Padding(
-            padding: EdgeInsets.fromLTRB(22, 0, 16, 6),
-            child: Text('每 天', style: TextStyle(fontSize: 12, color: K.mute, fontWeight: FontWeight.w700, letterSpacing: 3)),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+            child: ModeSwitch(byCat: byCat, onMode: onMode),
           ),
-          Expanded(child: DayNav(store: store, day: day, onPick: onPick)),
+          Expanded(
+              child: byCat ? CatNav(store: store, cat: cat, onPick: onPickCat) : DayNav(store: store, day: day, onPick: onPick)),
           CardPanel(syncer: syncer, store: store),
         ]),
       );
+}
+
+/// 「按天 / 按类别」切换。
+class ModeSwitch extends StatelessWidget {
+  final bool byCat, compact;
+  final void Function(bool) onMode;
+  const ModeSwitch({super.key, required this.byCat, required this.onMode, this.compact = false});
+
+  @override
+  Widget build(BuildContext context) {
+    Widget seg(String t, bool v) => Expanded(
+          flex: compact ? 0 : 1,
+          child: GestureDetector(
+            onTap: () => onMode(v),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 160),
+              padding: EdgeInsets.symmetric(vertical: 7, horizontal: compact ? 12 : 0),
+              decoration: BoxDecoration(color: byCat == v ? K.card : Colors.transparent, borderRadius: BorderRadius.circular(9),
+                  boxShadow: byCat == v ? const [BoxShadow(color: Color(0x14000000), blurRadius: 4, offset: Offset(0, 1))] : null),
+              alignment: Alignment.center,
+              child: Text(t, style: TextStyle(fontSize: 13, fontWeight: byCat == v ? FontWeight.w700 : FontWeight.w500,
+                  color: byCat == v ? K.ink : K.mute)),
+            ),
+          ),
+        );
+    return Container(
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(color: K.cardDeep.withValues(alpha: 0.55), borderRadius: BorderRadius.circular(12)),
+      child: Row(mainAxisSize: compact ? MainAxisSize.min : MainAxisSize.max, children: [seg('按天', false), seg('按类别', true)]),
+    );
+  }
+}
+
+/// 左栏：类别 + 数量。
+class CatNav extends StatelessWidget {
+  final Store store;
+  final String? cat;
+  final void Function(String) onPick;
+  const CatNav({super.key, required this.store, required this.cat, required this.onPick});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = store.byCategory;
+    if (c.isEmpty) return const SizedBox();
+    return ListView(padding: const EdgeInsets.symmetric(horizontal: 10), children: [
+      for (final e in c.entries)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 2),
+          child: Material(
+            color: e.key == cat ? K.card : Colors.transparent,
+            borderRadius: BorderRadius.circular(10),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(10),
+              onTap: () => onPick(e.key),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                child: Row(children: [
+                  Container(width: 8, height: 8, decoration: BoxDecoration(color: categoryColors(e.key).$2, shape: BoxShape.circle)),
+                  const SizedBox(width: 10),
+                  Expanded(
+                      child: Text(catFolder(e.key),
+                          style: TextStyle(fontWeight: e.key == cat ? FontWeight.w600 : FontWeight.w400, color: e.key == cat ? K.ink : K.mute))),
+                  Text('${e.value.length}',
+                      style: TextStyle(fontSize: 12, color: e.key == cat ? K.accent : K.faint, fontWeight: FontWeight.w600)),
+                ]),
+              ),
+            ),
+          ),
+        ),
+    ]);
+  }
 }
 
 class DayNav extends StatelessWidget {
@@ -399,11 +521,75 @@ class DayColumn extends StatelessWidget {
   }
 }
 
+/// 中栏（按类别）：这一类所有的记录，按日子分组；现场调研按调研对象分组。
+class CatColumn extends StatelessWidget {
+  final Store store;
+  final String? cat;
+  final List<Scene> scenes;
+  final String? selected;
+  final void Function(Scene) onPick;
+  final double top;
+  const CatColumn(
+      {super.key, required this.store, required this.cat, required this.scenes, required this.selected, required this.onPick,
+      this.top = 20});
+
+  @override
+  Widget build(BuildContext context) {
+    if (cat == null) return const Hint('wave', '还没有录音', '整理好以后，这里按类别看：会议纪要、商务洽谈、现场调研……');
+    final bySubject = cat == '现场调研';
+    final groups = <String, List<Scene>>{};
+    for (final s in scenes) {
+      groups.putIfAbsent(bySubject ? (s.subject.isEmpty ? '没写对象' : s.subject) : s.dayKey, () => []).add(s);
+    }
+    final total = scenes.fold<Duration>(Duration.zero, (a, s) => a + s.end.difference(s.start));
+    final hint = cats.firstWhere((c) => c.key == cat, orElse: () => const Cat('', '', '')).hint;
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Padding(
+        padding: EdgeInsets.fromLTRB(24, top, 20, 12),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(catFolder(cat!), style: K.title(26).copyWith(color: K.ink)),
+          const SizedBox(height: 2),
+          const Squiggle(width: 132),
+          const SizedBox(height: 10),
+          Wrap(spacing: 6, runSpacing: 6, children: [
+            _Stat(Icons.view_agenda_outlined, '${scenes.length} 段'),
+            _Stat(Icons.mic_none, '共 ${duration(total)}'),
+            if (bySubject) _Stat(Icons.place_outlined, '${groups.length} 个对象'),
+          ]),
+          if (hint.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(hint, style: const TextStyle(fontSize: 12, color: K.faint)),
+          ],
+        ]),
+      ),
+      Expanded(
+        child: ListView(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6), children: [
+          for (final g in groups.entries) ...[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 10, 8, 6),
+              child: Row(children: [
+                Text(bySubject ? g.key : dayTitle(g.key, short: true),
+                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: K.mute)),
+                const SizedBox(width: 8),
+                if (bySubject) Text('${g.value.length} 次', style: const TextStyle(fontSize: 12, color: K.faint)),
+                const SizedBox(width: 8),
+                const Expanded(child: Divider(color: K.line)),
+              ]),
+            ),
+            for (final s in g.value) SceneRow(scene: s, selected: s.id == selected, onTap: () => onPick(s), showDate: bySubject),
+          ],
+        ]),
+      ),
+      AskBox(store: store, scenes: scenes, hint: '问问小耳：这些${catFolder(cat!)}里…'),
+    ]);
+  }
+}
+
 class SceneRow extends StatelessWidget {
   final Scene scene;
-  final bool selected;
+  final bool selected, showDate;
   final VoidCallback onTap;
-  const SceneRow({super.key, required this.scene, required this.selected, required this.onTap});
+  const SceneRow({super.key, required this.scene, required this.selected, required this.onTap, this.showDate = false});
 
   @override
   Widget build(BuildContext context) => Padding(
@@ -423,7 +609,7 @@ class SceneRow extends StatelessWidget {
               child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 SizedBox(
                     width: 52,
-                    child: Text(hm(scene.start),
+                    child: Text(showDate ? '${scene.start.month}/${scene.start.day}' : hm(scene.start),
                         style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: selected ? K.accent : K.faint,
                             fontFeatures: const [FontFeature.tabularFigures()]))),
                 Expanded(
@@ -486,7 +672,8 @@ class Hint extends StatelessWidget {
 class AskBox extends StatefulWidget {
   final Store store;
   final List<Scene> scenes;
-  const AskBox({super.key, required this.store, required this.scenes});
+  final String hint;
+  const AskBox({super.key, required this.store, required this.scenes, this.hint = '问问小耳：这天我答应了谁什么？'});
   @override
   State<AskBox> createState() => _AskBoxState();
 }
@@ -501,9 +688,21 @@ class _AskBoxState extends State<AskBox> {
     setState(() => _busy = true);
     String answer;
     try {
-      // 问当天：要点 + 逐字稿都给它（云端截到 6 万字）；当天找不到的，模型会说没找到
-      final ctx = [for (final s in widget.scenes) Map<String, dynamic>.from(s.d)];
-      answer = await Cloud.instance!.ask(q, ctx);
+      // 问当天 / 这一类：整理好的笔记优先，再给逐字稿，截到 6 万字；找不到的，模型会说没找到
+      final ctx = [
+        for (final s in widget.scenes)
+          {
+            'time': '${s.d['start']}–${s.d['end'].toString().substring(11, 16)}', 'category': s.category, 'title': s.title,
+            'event': s.event, 'place': s.place, 'people': s.people, if (s.subject.isNotEmpty) 'subject': s.subject,
+            'note': s.body.isNotEmpty ? s.body : legacyBody(s), 'actions': s.actions, 'reminders': s.reminders,
+          },
+      ];
+      var json = jsonEncode(ctx);
+      if (json.length < 40000) {
+        json = jsonEncode([for (final (i, s) in widget.scenes.indexed) {...ctx[i], 'text': s.text}]);
+      }
+      answer = await Llm.instance!.chat(askPrompt,
+          '## 我的录音记录\n${json.length > 60000 ? json.substring(0, 60000) : json}\n\n## 我的问题\n$q', temperature: 0.3);
     } catch (e) {
       answer = '没问成：$e';
     }
@@ -540,7 +739,7 @@ class _AskBoxState extends State<AskBox> {
             child: TextField(
               controller: _q,
               onSubmitted: (_) => _ask(),
-              decoration: const InputDecoration(hintText: '问问小耳：这天我答应了谁什么？'),
+              decoration: InputDecoration(hintText: widget.hint),
             ),
           ),
           FilledButton(
@@ -615,12 +814,13 @@ class SceneDetail extends StatelessWidget {
       for (final r in s.reminders) '${r['text']}${(r['when'] ?? '').toString().isNotEmpty ? ' · ${r['when']}' : ''}',
     ];
     const body = TextStyle(fontSize: 14, height: 1.7);
-    return ListView(padding: EdgeInsets.fromLTRB(32, top, 32, 32), children: [
+    return ListView(key: PageStorageKey(s.id), padding: EdgeInsets.fromLTRB(32, top, 32, 32), children: [
       Wrap(spacing: 14, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
         Chip2(s.category),
         meta(Icons.schedule, '${hm(s.start)}–${hm(s.end)} · ${duration(s.end.difference(s.start))}'),
         if (s.place.isNotEmpty) meta(Icons.place_outlined, s.place),
         if (s.people.isNotEmpty) meta(Icons.people_outline, s.people.join('、')),
+        if (s.subject.isNotEmpty) meta(Icons.travel_explore, '调研对象：${s.subject}'),
       ]),
       const SizedBox(height: 10),
       SelectableText(s.title, style: K.title(26).copyWith(color: K.ink)),
@@ -629,8 +829,9 @@ class SceneDetail extends StatelessWidget {
       const SizedBox(height: 8),
       SelectableText(s.event, style: const TextStyle(fontSize: 15, height: 1.7)),
       const SizedBox(height: 16),
-      if (s.minutes != null) ...[Minutes(scene: s), const SizedBox(height: 12)],
-      LayoutBuilder(builder: (_, c) {
+      if (!s.noise) ...[NoteCard(scene: s, store: store), const SizedBox(height: 12)],
+      if (s.body.isEmpty && s.minutes != null) ...[Minutes(scene: s), const SizedBox(height: 12)],
+      if (s.body.isEmpty) LayoutBuilder(builder: (_, c) {
         final boxes = [
           if (s.valuable.isNotEmpty || s.views.isNotEmpty)
             _box('有价值的内容', Icons.auto_awesome_outlined, K.ink,
@@ -651,7 +852,7 @@ class SceneDetail extends StatelessWidget {
           ]),
         );
       }),
-      if (s.memorable.isNotEmpty) ...[
+      if (s.body.isEmpty && s.memorable.isNotEmpty) ...[
         const SizedBox(height: 12),
         _box('值得记住的', Icons.format_quote, K.ink, [
           for (final m in s.memorable)
@@ -693,7 +894,77 @@ class SceneDetail extends StatelessWidget {
   }
 }
 
-// ───────── 会议纪要（开会 / 商业洽谈） ─────────
+// ───────── 按类别整理好的笔记 ─────────
+
+class NoteCard extends StatefulWidget {
+  final Scene scene;
+  final Store store;
+  const NoteCard({super.key, required this.scene, required this.store});
+  @override
+  State<NoteCard> createState() => _NoteCardState();
+}
+
+class _NoteCardState extends State<NoteCard> {
+  bool _busy = false;
+
+  /// 按现在的模板（资料文件夹/模板/<类别>.md，改过就按改过的）重新整理这一段。
+  Future<void> _redo() async {
+    setState(() => _busy = true);
+    final s = widget.scene;
+    try {
+      s.d['body'] = await Analyzer.of(widget.store.lib, Llm.instance!).note(s);
+      await widget.store.putScene(s);
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('没整理成：$e')));
+    }
+    if (mounted) setState(() => _busy = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = widget.scene;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(20, 14, 16, 16),
+      decoration: BoxDecoration(color: K.card, borderRadius: BorderRadius.circular(16), border: Border.all(color: K.accentEdge)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Row(children: [
+          Label(catFolder(s.category), color: K.accent),
+          const Spacer(),
+          if (s.body.isNotEmpty)
+            IconButton(
+              tooltip: '复制这份笔记',
+              visualDensity: VisualDensity.compact,
+              icon: const Icon(Icons.copy_rounded, size: 17, color: K.mute),
+              onPressed: () async {
+                await Clipboard.setData(ClipboardData(text: '# ${s.title}\n\n${s.body}'));
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('复制好了，可以直接粘到微信 / 飞书')));
+                }
+              },
+            ),
+          if (s.d['file'] != null && Platform.isMacOS)
+            IconButton(
+              tooltip: '在 Finder 里看这份笔记',
+              visualDensity: VisualDensity.compact,
+              icon: const Icon(Icons.folder_open_outlined, size: 17, color: K.mute),
+              onPressed: () => Process.run('open', ['-R', s.d['file']]),
+            ),
+          TextButton(
+            onPressed: _busy ? null : _redo,
+            style: TextButton.styleFrom(foregroundColor: K.accent, visualDensity: VisualDensity.compact),
+            child: _busy
+                ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: K.accent))
+                : Text(s.body.isEmpty ? '按模板整理' : '重新整理'),
+          ),
+        ]),
+        const SizedBox(height: 6),
+        if (s.body.isNotEmpty) MdView(s.body) else const Text('这段还没按类别整理过。', style: TextStyle(color: K.faint)),
+      ]),
+    );
+  }
+}
+
+// ───────── 会议纪要（旧版：开会 / 商业洽谈） ─────────
 
 class Minutes extends StatelessWidget {
   final Scene scene;

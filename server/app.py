@@ -4,7 +4,10 @@
     POST /v1/recordings?name=&tz=   body=卡上的原文件（裸 Opus 或 Ogg）  → {"id", "status"}
     GET  /v1/recordings/<id>                  → {"status": queued|working|done|error, "progress", "result"}
     GET  /v1/recordings/<id>/audio            → m4a（App 里播放用）
-    POST /v1/ask    {"question", "scenes":[…]} → {"answer"}           「问问我的录音」
+    POST /v1/recordings?…&asr=1                只转写，不切场景（新版 App 自己按类别整理）
+    DELETE /v1/recordings/<id>                App 取走了 → 服务器上这条全删（服务器不留内容）
+    POST /v1/llm    {"messages", "temperature"} → {"content"}         不留记录的模型中转（用户没填自己的 key 时）
+    POST /v1/ask    {"question", "scenes":[…]} → {"answer"}           「问问我的录音」（旧版 App）
     GET  /healthz
     GET  /                                    下载页（Mac 安装包 + 安卓 APK，放在 <DATA>/download/）
     GET  /download/<文件>
@@ -47,6 +50,8 @@ DATA = Path(os.environ.get("LUYINKA_CLOUD_DATA", Path.home() / "luyinka-cloud"))
 TOKENS = DATA / "tokens.json"
 MAX_UPLOAD = 300 * 1024 * 1024          # 一条最多 300MB（裸 Opus 约 2KB/秒，够 40 小时）
 DAILY_SECONDS = 24 * 3600               # 每台设备每天最多处理 24 小时录音
+DAILY_LLM = 600                         # 每台设备每天最多调 600 次模型（一天录满约 100 次）
+KEEP_HOURS = 24                         # App 一直没来取的，过这么久也删
 SAFE = re.compile(r"^[0-9A-Za-z_.-]{1,80}$")
 JOBS: "queue.Queue[tuple[str, str]]" = queue.Queue()
 LOCK = threading.Lock()
@@ -143,9 +148,9 @@ def process(token: str, dev: str, rid: str) -> None:
         _transcribe(ogg, md, title, prog)
         lines = [[scenes._clock(scenes.recording_start(md), sec), text] for sec, text in scenes.load_lines(md)]
         set_status(d, progress=85)
-        cut = scenes.cut(md) if lines else []
+        cut = scenes.cut(md) if lines and not meta.get("asr") else []
         set_status(d, progress=92)
-        scenes.add_minutes(cut)                              # 开会 / 洽谈 → 再出一份标准纪要
+        scenes.add_minutes(cut)                              # 开会 / 洽谈 → 再出一份标准纪要（旧版 App）
     for s in cut:
         s.pop("audio", None)
         s.pop("card", None)
@@ -196,6 +201,45 @@ def requeue() -> None:
             tok = by_dev.get(st.parent.parent.name)
             if tok:
                 JOBS.put((tok, st.parent.name))
+
+
+# ───────── 不留记录的模型中转 ─────────
+
+def llm_chat(messages: list, temperature: float = 0.2) -> str:
+    """原样转给服务器配的模型（DeepSeek），只回内容。不写日志、不落盘。"""
+    llm = C["llm"]
+    body = {"model": llm["model"], "temperature": temperature, "messages": messages}
+    req = urllib.request.Request(llm["base_url"].rstrip("/") + "/chat/completions", data=json.dumps(body).encode(),
+                                 headers={"Content-Type": "application/json",
+                                          "Authorization": "Bearer " + (llm.get("api_key") or "x")})
+    with urllib.request.urlopen(req, timeout=300) as r:
+        out = json.load(r)["choices"][0]["message"]["content"]
+    return re.sub(r"<think>.*?</think>", "", out, flags=re.S).strip()
+
+
+def count_llm(token: str) -> bool:
+    day = dt.date.today().isoformat()
+    with LOCK:
+        db = read_json(TOKENS, {})
+        rec = db.get(token)
+        if rec is None:
+            return False
+        n = rec.setdefault("llm", {})
+        if n.get(day, 0) >= DAILY_LLM:
+            return False
+        rec["llm"] = {day: n.get(day, 0) + 1}
+        write_json(TOKENS, db)
+    return True
+
+
+def sweep() -> None:
+    """App 没来取（卸载了 / 一直离线）的也别一直留：做完超过 KEEP_HOURS 的整条删掉。"""
+    while True:
+        cutoff = time.time() - KEEP_HOURS * 3600
+        for st in (DATA / "devices").glob("*/*/status.json"):
+            if (read_json(st) or {}).get("status") in ("done", "error") and st.stat().st_mtime < cutoff:
+                shutil.rmtree(st.parent, ignore_errors=True)
+        time.sleep(3600)
 
 
 # ───────── 问问我的录音 ─────────
@@ -312,6 +356,19 @@ class H(BaseHTTPRequestHandler):
             st["result"] = read_json(d / "result.json")
         return self.send(200, st)
 
+    def do_DELETE(self):
+        a = self.auth()
+        if not a:
+            return self.send(401, {"error": "没登记，重开一下 App"})
+        m = re.match(r"^/v1/recordings/([0-9A-Za-z_-]+)$", urlparse(self.path).path)
+        if not m:
+            return self.send(404, {"error": "没有这个"})
+        d = job_dir(a[1], m.group(1))
+        if (read_json(d / "status.json", {}) or {}).get("status") in ("queued", "working"):
+            return self.send(409, {"error": "还在处理"})
+        shutil.rmtree(d, ignore_errors=True)
+        return self.send(200, {"ok": True})
+
     def do_POST(self):
         u = urlparse(self.path)
         try:
@@ -331,10 +388,17 @@ class H(BaseHTTPRequestHandler):
                 d = job_dir(a[1], rid)
                 d.mkdir(parents=True)
                 (d / "upload.bin").write_bytes(raw)
-                write_json(d / "meta.json", {"name": name, "tz": tz, "bytes": len(raw)})
+                write_json(d / "meta.json", {"name": name, "tz": tz, "bytes": len(raw), "asr": q.get("asr") == ["1"]})
                 set_status(d, status="queued", progress=0)
                 JOBS.put((a[0], rid))
                 return self.send(200, {"id": rid, "status": "queued", "ahead": JOBS.qsize() - 1})
+            if u.path == "/v1/llm":
+                b = json.loads(self.body(2 * 1024 * 1024) or b"{}")
+                if not isinstance(b.get("messages"), list) or not b["messages"]:
+                    return self.send(400, {"error": "没给 messages"})
+                if not count_llm(a[0]):
+                    return self.send(429, {"error": "今天整理的次数用完了，明天再来，或在设置里填自己的模型 key"})
+                return self.send(200, {"content": llm_chat(b["messages"], float(b.get("temperature") or 0.2))})
             if u.path == "/v1/ask":
                 b = json.loads(self.body(2 * 1024 * 1024) or b"{}")
                 if not str(b.get("question") or "").strip():
@@ -357,6 +421,7 @@ def main():
     if not shutil.which("ffmpeg"):
         sys.exit("服务器上要装 ffmpeg")
     threading.Thread(target=worker, daemon=True).start()
+    threading.Thread(target=sweep, daemon=True).start()
     requeue()
     httpd = ThreadingHTTPServer((args.host, args.port), H)
     if args.tls_cert:

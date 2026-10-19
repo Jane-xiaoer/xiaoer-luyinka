@@ -1,9 +1,11 @@
-// 同步：卡 → 本机 → 云端 → 场景。打开 App 自动跑，之后每 30 秒看一眼（卡在旁边就拉，云端好了就收）。
+// 同步：卡 → 本机 → 云端转写 → 本机按类别整理 → 资料文件夹。打开 App 自动跑，之后每 30 秒看一眼。
 import 'dart:async';
 
+import 'analyze.dart';
 import 'card/client.dart';
 import 'card/protocol.dart';
 import 'cloud.dart';
+import 'llm.dart';
 import 'store.dart';
 
 typedef LinkFactory = Future<Link?> Function(String id); // 只连这一张；不在旁边返回 null
@@ -36,7 +38,11 @@ class Syncer {
   Timer? _timer;
   void Function()? onChange;
 
-  Syncer(this.store, this.cloud, this.connect, this.scan, this.timezone) {
+  late final Llm llm;
+  Chat? chat; // 测试时换成假的
+
+  Syncer(this.store, this.cloud, this.connect, this.scan, this.timezone, {this.chat}) {
+    llm = Llm(cloud, () => Map<String, dynamic>.from(store.settings['llm'] ?? {}));
     cloud.onToken = (t) {
       store.settings['token'] = t;
       store.save();
@@ -78,6 +84,14 @@ class Syncer {
   }
 
   void start() {
+    // 旧版整理的（还没按类别模板写笔记）：排进「待整理」，升级后自动按新模板重整一遍
+    for (final r in store.recs.values.where((r) => r.stage == 'done')) {
+      final res = store.readResult(r.stem);
+      final sc = res?['scenes'] as List?;
+      if (sc != null && sc.isNotEmpty && sc.every((x) => x is Map && !x.containsKey('body')) && (res?['lines'] as List?)?.isNotEmpty == true) {
+        r.stage = 'transcribed';
+      }
+    }
     _timer?.cancel();
     _timer = Timer.periodic(const Duration(seconds: 30), (_) => run());
     run();
@@ -99,6 +113,7 @@ class Syncer {
       if (fromCard) await _pull();
       await _upload();
       await _collect();
+      await _analyze();
     } on CloudError catch (e) {
       if (e.status == 401) {
         // 云端不认这个登记（换了服务器 / 数据重置）：重新登记，没出结果的从头传
@@ -214,14 +229,20 @@ class Syncer {
       final j = await cloud.job(r.job!);
       r.progress = (j['progress'] as num?)?.toInt() ?? r.progress;
       if (j['status'] == 'done') {
-        await store.putResult(r.stem, Map<String, dynamic>.from(j['result']));
+        final res = Map<String, dynamic>.from(j['result']);
+        final lines = [for (final x in (res['lines'] as List? ?? const [])) List<String>.from(x)];
+        await store.lib.writeTranscript(r.stem, (res['start'] ?? '').toString(), lines);
         try {
           await store.audio(r.stem).writeAsBytes(await cloud.audio(r.job!));
         } catch (_) {}
+        final old = (res['scenes'] as List?)?.isNotEmpty == true; // 旧版云端已经切好了
+        await store.putResult(r.stem, {...res, 'scenes': res['scenes'] ?? []});
+        await cloud.delete(r.job!).catchError((_) {}); // 取走了，云端删掉
         final raw = store.raw(r.stem);
         if (await raw.exists()) await raw.delete();
         r
-          ..stage = 'done'
+          ..stage = old || lines.isEmpty ? 'done' : 'transcribed'
+          ..job = null
           ..error = null;
       } else if (j['status'] == 'error') {
         r
@@ -230,5 +251,48 @@ class Syncer {
       }
       _changed();
     }
+  }
+
+  /// 转写好的：在这台设备上按类别整理。失败了（没网 / key 不对）过 3 分钟再试，逐字稿已经存好了不会丢。
+  Future<void> _analyze() async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    for (final r in store.recs.values.where((r) => r.stage == 'transcribed' && now - r.tried > 180000).toList()) {
+      final res = store.readResult(r.stem);
+      if (res == null) {
+        r.stage = 'done';
+        continue;
+      }
+      r
+        ..stage = 'analyzing'
+        ..progress = 0;
+      _changed();
+      try {
+        final a = chat != null ? Analyzer(store.lib, chat!) : Analyzer.of(store.lib, llm);
+        res['scenes'] = await a.run(r.stem, res, progress: (d, t) {
+          r.progress = t == 0 ? 0 : d * 100 ~/ t;
+          onChange?.call();
+        });
+        await store.putResult(r.stem, res);
+        r
+          ..stage = 'done'
+          ..error = null;
+      } catch (e) {
+        r
+          ..stage = 'transcribed'
+          ..tried = now
+          ..error = '整理没成功，稍后自动再试：$e';
+      }
+      _changed();
+    }
+  }
+
+  /// 按（改过的）模板重新整理一条录音。
+  Future<void> reanalyze(String stem) async {
+    final r = store.recs.putIfAbsent(stem, () => Rec(stem, 0, 'transcribed')..deletedOnCard = true);
+    r
+      ..stage = 'transcribed'
+      ..tried = 0;
+    _changed();
+    await run(fromCard: false);
   }
 }

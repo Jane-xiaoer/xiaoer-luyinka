@@ -1,13 +1,15 @@
-// 本机存储：每条录音的进度（拉到哪 / 传了没 / 云端好了没）+ 云端回来的场景。都在 App 自己的文件夹里。
+// 本机存储。App 自己的文件夹里只放同步进度；整理好的内容都在用户的资料文件夹（library.dart）。
 //   <dir>/state.json            设置 + 每条录音的状态
 //   <dir>/raw/<stem>.opus.part  正在从卡上拉的（断了接着拉）
-//   <dir>/raw/<stem>.opus       拉完、还没传上云的
-//   <dir>/result/<stem>.json    云端结果（场景 + 全文）
-//   <dir>/audio/<stem>.m4a      播放用
+//   <dir>/raw/<stem>.opus       拉完、还没传上云的（转写好就删）
+//   <资料>/.xiaoer/<stem>.json   逐字稿 + 场景（App 的索引）  <资料>/录音/<stem>.m4a  播放用
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+
+import 'library.dart';
+import 'templates.dart';
 
 class Scene {
   final Map<String, dynamic> d;
@@ -17,7 +19,7 @@ class Scene {
   // 按录音当时的墙上时间显示（不换算成本机 / UTC）：只取 ISO 串的前 19 位
   DateTime get start => DateTime.parse(d['start'].toString().substring(0, 19));
   DateTime get end => DateTime.parse(d['end'].toString().substring(0, 19));
-  String get category => d['category'] ?? '';
+  String get category => catKey(d['category'] ?? '');
   String get title => d['title'] ?? '';
   String get event => d['event'] ?? '';
   String get place => d['place'] ?? '';
@@ -34,7 +36,9 @@ class Scene {
   // 开会 / 商业洽谈才有：云端单独整理的标准会议纪要（结构化 + 可直接复制的 Markdown）
   Map<String, dynamic>? get minutes => d['minutes'] == null ? null : Map<String, dynamic>.from(d['minutes']);
   String get minutesMd => d['minutes_md'] ?? '';
-  bool get noise => category == '杂音';
+  String get subject => d['subject'] ?? ''; // 现场调研的对象
+  String get body => d['body'] ?? ''; // 按类别模板整理好的笔记（Markdown）；旧版数据没有
+  bool get noise => category == noiseCat;
   int get todo => actions.length + reminders.length;
   String get dayKey => d['start'].toString().substring(0, 10);
 }
@@ -42,24 +46,26 @@ class Scene {
 class Rec {
   String stem;
   int size;
-  String stage; // card 在卡上 · pulling 拉取中 · pulled 已拉 · uploading · processing 云端处理 · done · error
+  String stage; // card 在卡上 · pulling 拉取中 · pulled 已拉 · uploading · processing 云端转写 · transcribed 待整理 · analyzing 整理中 · done · error
   int got = 0; // 已拉字节
   int progress = 0; // 云端进度 0–100
   String? job;
   String? error;
   bool deletedOnCard = false;
+  int tried = 0; // 上次整理失败的时间（ms），隔一会儿再试
   Rec(this.stem, this.size, this.stage);
 
   Map<String, dynamic> toJson() => {
         'stem': stem, 'size': size, 'stage': stage, 'got': got, 'progress': progress,
-        'job': job, 'error': error, 'deletedOnCard': deletedOnCard,
+        'job': job, 'error': error, 'deletedOnCard': deletedOnCard, 'tried': tried,
       };
   static Rec fromJson(Map<String, dynamic> j) => Rec(j['stem'], j['size'] ?? 0, j['stage'] ?? 'card')
     ..got = j['got'] ?? 0
     ..progress = j['progress'] ?? 0
     ..job = j['job']
     ..error = j['error']
-    ..deletedOnCard = j['deletedOnCard'] ?? false;
+    ..deletedOnCard = j['deletedOnCard'] ?? false
+    ..tried = j['tried'] ?? 0;
 }
 
 class Store extends ChangeNotifier {
@@ -67,18 +73,17 @@ class Store extends ChangeNotifier {
   Map<String, dynamic> settings = {};
   final Map<String, Rec> recs = {};
   final Map<String, List<Scene>> _scenes = {}; // stem → 场景
+  late Library lib;
 
   Store(this.dir);
 
   File get _state => File('${dir.path}/state.json');
   File raw(String stem, {bool part = false}) => File('${dir.path}/raw/$stem.opus${part ? '.part' : ''}');
-  File result(String stem) => File('${dir.path}/result/$stem.json');
-  File audio(String stem) => File('${dir.path}/audio/$stem.m4a');
+  File result(String stem) => lib.data(stem);
+  File audio(String stem) => lib.audio(stem);
 
   Future<void> load() async {
-    for (final d in ['raw', 'result', 'audio']) {
-      await Directory('${dir.path}/$d').create(recursive: true);
-    }
+    await Directory('${dir.path}/raw').create(recursive: true);
     if (await _state.exists()) {
       final j = jsonDecode(await _state.readAsString());
       settings = Map<String, dynamic>.from(j['settings'] ?? {});
@@ -87,10 +92,32 @@ class Store extends ChangeNotifier {
         recs[rec.stem] = rec;
       }
     }
-    for (final r in recs.values.where((r) => r.stage == 'done')) {
-      await _loadScenes(r.stem);
+    lib = Library(Directory((settings['library'] as String?) ?? (await Library.defaultDir()).path));
+    await lib.ensure();
+    await migrateOld(dir, lib);
+    await reload();
+  }
+
+  /// 资料文件夹里的索引全读一遍（换了文件夹 / 外面删了文件后也用它）。
+  Future<void> reload() async {
+    _scenes.clear();
+    final d = Directory('${lib.path}/.xiaoer');
+    if (await d.exists()) {
+      for (final f in d.listSync().whereType<File>().where((f) => f.path.endsWith('.json'))) {
+        try {
+          await _loadScenes(f.uri.pathSegments.last.replaceAll(RegExp(r'\.json$'), ''));
+        } catch (_) {}
+      }
     }
     notifyListeners();
+  }
+
+  Future<void> moveLibrary(String path) async {
+    settings['library'] = path;
+    lib = Library(Directory(path));
+    await lib.ensure();
+    await save();
+    await reload();
   }
 
   Future<void> _saving = Future.value();
@@ -110,9 +137,32 @@ class Store extends ChangeNotifier {
     _scenes[stem] = [for (final s in (j['scenes'] as List? ?? [])) Scene(Map<String, dynamic>.from(s), stem)];
   }
 
+  Map<String, dynamic>? readResult(String stem) {
+    final f = result(stem);
+    return f.existsSync() ? Map<String, dynamic>.from(jsonDecode(f.readAsStringSync())) : null;
+  }
+
+  /// 存一条录音的结果：索引 + 每段的笔记文件 + 那几天的时间线。
   Future<void> putResult(String stem, Map<String, dynamic> res) async {
-    await result(stem).writeAsString(jsonEncode(res));
-    await _loadScenes(stem);
+    final scenes = [for (final s in (res['scenes'] as List? ?? const [])) Scene(Map<String, dynamic>.from(s), stem)];
+    for (final s in scenes.where((s) => !s.noise)) {
+      await lib.writeNote(s);
+    }
+    res['scenes'] = [for (final s in scenes) s.d];
+    await result(stem).writeAsString(prettyJson(res));
+    _scenes[stem] = scenes;
+    for (final day in {for (final s in scenes) s.dayKey}) {
+      await lib.writeDay(day, days[day] ?? []);
+    }
+    notifyListeners();
+  }
+
+  /// 改了一段（重新整理过）：写回索引和笔记。
+  Future<void> putScene(Scene s) async {
+    final res = readResult(s.stem);
+    if (res == null) return;
+    res['scenes'] = [for (final x in _scenes[s.stem] ?? <Scene>[]) x.id == s.id ? s.d : x.d];
+    await putResult(s.stem, res);
   }
 
   /// 所有场景（不含杂音），新的在前。
@@ -136,4 +186,16 @@ class Store extends ChangeNotifier {
 
   /// 正在路上的（还没出结果的）。
   List<Rec> get pending => recs.values.where((r) => r.stage != 'done').toList();
+
+  /// 类别 → 这一类的场景（新的在前），按 cats 的顺序，没有的类别不出现。
+  Map<String, List<Scene>> get byCategory {
+    final out = <String, List<Scene>>{};
+    for (final c in cats) {
+      final l = scenes.where((s) => s.category == c.key).toList();
+      if (l.isNotEmpty) out[c.key] = l;
+    }
+    final other = scenes.where((s) => !cats.any((c) => c.key == s.category)).toList();
+    if (other.isNotEmpty) out['其他'] = other;
+    return out;
+  }
 }

@@ -1,4 +1,4 @@
-// 云端：上传卡上的录音 → 转写 + 切场景 → 拿回结果（server/app.py）。用户设备上不跑任何模型。
+// 云端：上传卡上的录音 → 转写 → 拿回逐字稿和播放用的音频 → 叫云端删掉（server/app.py）。云端不留内容。
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -39,7 +39,7 @@ class Cloud {
 
   /// 卡上原文件 → 任务 id。
   Future<String> upload(String name, Uint8List raw, String tz) async {
-    final uri = Uri.parse('$base/v1/recordings').replace(queryParameters: {'name': name, 'tz': tz});
+    final uri = Uri.parse('$base/v1/recordings').replace(queryParameters: {'name': name, 'tz': tz, 'asr': '1'});
     final d = await _json(await http.post(uri, headers: {..._auth, 'Content-Type': 'application/octet-stream'}, body: raw));
     return d['id'] as String;
   }
@@ -52,6 +52,11 @@ class Cloud {
     final r = await http.get(Uri.parse('$base/v1/recordings/$id/audio'), headers: _auth);
     if (r.statusCode != 200) throw CloudError('音频还没好');
     return r.bodyBytes;
+  }
+
+  /// 取走了：云端把这条全删。
+  Future<void> delete(String id) async {
+    await http.delete(Uri.parse('$base/v1/recordings/$id'), headers: _auth);
   }
 
   Future<String> ask(String question, List<Map<String, dynamic>> scenes) async {
