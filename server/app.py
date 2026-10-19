@@ -8,6 +8,7 @@
     DELETE /v1/recordings/<id>                App 取走了 → 服务器上这条全删（服务器不留内容）
     POST /v1/llm    {"messages", "temperature"} → {"content"}         不留记录的模型中转（用户没填自己的 key 时）
     POST /v1/ask    {"question", "scenes":[…]} → {"answer"}           「问问我的录音」（旧版 App）
+    POST /v1/transcribe  body=16k 单声道 s16le 裸 PCM（一句话） → {"text"}   只转写不切场景（小耳经纪人🎙边说边转借用）
     GET  /healthz
     GET  /                                    下载页（Mac 安装包 + 安卓 APK，放在 <DATA>/download/）
     GET  /download/<文件>
@@ -168,13 +169,33 @@ def _transcribe(ogg: Path, md: Path, title: str, prog) -> None:
     """转写成 md（模型常驻在 pipeline._transcriber，第一条之后不再加载）。"""
     from luyinka.transcribe import Transcriber, fmt_ts, to_markdown
 
-    if pipeline._transcriber is None:
-        pipeline._transcriber = Transcriber()
     with tempfile.TemporaryDirectory() as td:
         wav = Path(td) / "a.wav"
         pipeline.to_wav(ogg, wav)
-        segs = list(pipeline._transcriber.segments(wav, prog))
+        with ASR_LOCK:
+            if pipeline._transcriber is None:
+                pipeline._transcriber = Transcriber()
+            segs = list(pipeline._transcriber.segments(wav, prog))
     md.write_text(to_markdown(title, segs, {"时长": fmt_ts(pipeline.audio_seconds(ogg))}), encoding="utf-8")
+
+
+ASR_LOCK = threading.Lock()   # 常驻的转写模型：后台整理录音和 /v1/transcribe 共用，一次只让一个用
+MAX_SNIPPET = 10 * 1024 * 1024  # 一句话最多 5 分钟多一点（16k×2 字节/秒）
+
+
+def transcribe_snippet(pcm: bytes) -> str:
+    """一小段裸 PCM → 文字。小耳经纪人边说边转时一段一段送上来，拼接和纠错在她本机做。"""
+    import wave
+    from luyinka.transcribe import Transcriber
+    with tempfile.TemporaryDirectory() as td:
+        wav = Path(td) / "s.wav"
+        with wave.open(str(wav), "wb") as w:
+            w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000); w.writeframes(pcm)
+        with ASR_LOCK:
+            if pipeline._transcriber is None:
+                pipeline._transcriber = Transcriber()
+            segs = list(pipeline._transcriber.segments(wav))
+    return "".join(s.text for s in segs).strip()
 
 
 def worker() -> None:
@@ -392,6 +413,15 @@ class H(BaseHTTPRequestHandler):
                 set_status(d, status="queued", progress=0)
                 JOBS.put((a[0], rid))
                 return self.send(200, {"id": rid, "status": "queued", "ahead": JOBS.qsize() - 1})
+            if u.path == "/v1/transcribe":
+                pcm = self.body(MAX_SNIPPET)
+                if len(pcm) < 3200 or len(pcm) % 2:
+                    return self.send(200, {"text": ""})
+                if not charge(a[0], len(pcm) / 32000):
+                    return self.send(429, {"error": "今天处理的录音超过 24 小时了，明天再传"})
+                t0 = time.time()
+                text = transcribe_snippet(pcm)
+                return self.send(200, {"text": text, "ms": int((time.time() - t0) * 1000)})
             if u.path == "/v1/llm":
                 b = json.loads(self.body(2 * 1024 * 1024) or b"{}")
                 if not isinstance(b.get("messages"), list) or not b["messages"]:
