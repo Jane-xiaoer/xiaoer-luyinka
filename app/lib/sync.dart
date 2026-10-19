@@ -1,5 +1,7 @@
 // 同步：卡 → 本机 → 云端转写 → 本机按类别整理 → 资料文件夹。打开 App 自动跑，之后每 30 秒看一眼。
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
 import 'analyze.dart';
 import 'card/client.dart';
@@ -106,6 +108,8 @@ class Syncer {
     if (_busy) return;
     _busy = true;
     try {
+      // 不用云端，先收：云端登记不上也不耽误外面放进来的。它出错不能拖垮拉卡（每条的错它自己报）
+      await importInbox().catchError((_) {});
       cloud.token ??= store.settings['token'] as String?;
       if (cloud.token == null) {
         store.settings['token'] = await cloud.register();
@@ -248,6 +252,35 @@ class Syncer {
         r
           ..stage = 'error'
           ..error = j['error']?.toString();
+      }
+      _changed();
+    }
+  }
+
+  /// 不是卡上来的录音（小耳语音按三道杠说的长口述等）：别的程序在本机转写好，放进
+  /// <资料>/.xiaoer/inbox/<录音>.json（{start, lines:[[钟点, 文字]]}，最后写、写完再改名成 .json）
+  /// 和同名 .m4a（原声，可没有），这里收进来，跟卡上的一样排进「待整理」。收完把收件里的删掉。
+  Future<void> importInbox() async {
+    final inbox = Directory('${store.lib.path}/.xiaoer/inbox');
+    if (!await inbox.exists()) return;
+    for (final f in inbox.listSync().whereType<File>().where((f) => f.path.endsWith('.json'))) {
+      final stem = f.path.split('/').last.replaceAll(RegExp(r'\.json$'), '');
+      final audio = File('${inbox.path}/$stem.m4a');
+      try {
+        if (!store.recs.containsKey(stem) && !await store.result(stem).exists()) {
+          final res = Map<String, dynamic>.from(jsonDecode(await f.readAsString()));
+          final lines = [for (final x in (res['lines'] as List? ?? const [])) List<String>.from(x)];
+          if (lines.isNotEmpty) {
+            if (await audio.exists()) await audio.copy(store.audio(stem).path);
+            await store.lib.writeTranscript(stem, (res['start'] ?? '').toString(), lines);
+            await store.putResult(stem, {...res, 'scenes': []});
+            store.recs[stem] = Rec(stem, 0, 'transcribed')..deletedOnCard = true;
+          }
+        }
+        await f.delete();
+        if (await audio.exists()) await audio.delete();
+      } catch (e) {
+        card.error = '收外面放进来的录音没成功（$stem）：$e';
       }
       _changed();
     }
