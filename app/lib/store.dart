@@ -8,6 +8,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
+import 'drafts.dart';
 import 'library.dart';
 import 'templates.dart';
 
@@ -73,7 +74,11 @@ class Store extends ChangeNotifier {
   Map<String, dynamic> settings = {};
   final Map<String, Rec> recs = {};
   final Map<String, List<Scene>> _scenes = {}; // stem → 场景
-  late Library lib;
+  Library? _lib;
+  Library get lib => _lib!;
+  set lib(Library l) => _lib = l;
+  bool get hasLib => _lib != null;
+  List<Draft>? _drafts;
 
   Store(this.dir);
 
@@ -101,6 +106,7 @@ class Store extends ChangeNotifier {
   /// 资料文件夹里的索引全读一遍（换了文件夹 / 外面删了文件后也用它）。
   Future<void> reload() async {
     _scenes.clear();
+    _drafts = null;
     final d = Directory('${lib.path}/.xiaoer');
     if (await d.exists()) {
       for (final f in d.listSync().whereType<File>().where((f) => f.path.endsWith('.json'))) {
@@ -182,6 +188,14 @@ class Store extends ChangeNotifier {
       l.sort((a, b) => a.start.compareTo(b.start));
     }
     return out;
+  }
+
+  /// 成稿/ 里的文件（新的在前）。存了新的、或者要看外面改过的，先 [refreshDrafts]。
+  List<Draft> get drafts => _drafts ??= hasLib ? listDrafts(lib) : [];
+
+  void refreshDrafts() {
+    _drafts = null;
+    notifyListeners();
   }
 
   /// 正在路上的（还没出结果的）。

@@ -6,6 +6,8 @@
 //   逐字稿/<录音>.md                       整条录音的全文
 //   录音/<录音>.m4a                        播放用
 //   模板/<类别>.md                         各类别的整理方式，可以直接改
+//   模板/一键按钮.md、模板/我的写作风格.md     「拿去用」按钮的要求、让小耳写东西时照着的口吻
+//   成稿/2026-10-19 14.05 标题.md           对话里小耳写好、点了「存成稿」的东西
 //   .xiaoer/<录音>.json                    App 用的索引（删了 App 里就看不到那条，但上面的文件还在）
 import 'dart:convert';
 import 'dart:io';
@@ -36,15 +38,19 @@ class Library {
   Directory get subjectsDir => Directory('$path/现场调研/按对象');
   File subjectFile(String s) => File('${subjectsDir.path}/${safe(s)}.md');
   File get ideasFile => File('$path/个人感悟/观点库.md');
+  File get quickActionsFile => File('$path/模板/一键按钮.md');
+  File get styleFile => File('$path/模板/我的写作风格.md');
 
   Future<void> ensure() async {
-    for (final d in ['.xiaoer', '录音', '逐字稿', '每日', '模板']) {
+    for (final d in ['.xiaoer', '录音', '逐字稿', '每日', '模板', '成稿']) {
       await Directory('$path/$d').create(recursive: true);
     }
     for (final e in defaultTemplates.entries) {
       final f = templateFile(e.key);
       if (!await f.exists()) await f.writeAsString('${e.value}\n');
     }
+    if (!await quickActionsFile.exists()) await quickActionsFile.writeAsString(quickActionsMd(quickActions));
+    if (!await styleFile.exists()) await styleFile.writeAsString(defaultStyle);
     final readme = File('$path/说明.md');
     if (!await readme.exists()) {
       await readme.writeAsString('''# 小耳录音卡 · 资料文件夹
@@ -58,6 +64,8 @@ class Library {
 - 个人感悟/观点库.md：平时说出来的感悟、判断、演讲素材汇在一起，准备演讲时翻这一份
 - 逐字稿/、录音/：全文和原声
 - 模板/：每一类怎么整理。直接改这些 .md，下次整理就按你改过的来
+- 模板/一键按钮.md：每一类下面「拿去用」按钮让小耳写什么；模板/我的写作风格.md：让小耳写文章、朋友圈时照着的口吻
+- 成稿/：在对话里让小耳写好的文章、朋友圈、纪要消息，点「存成稿」存在这
 ''');
     }
   }
@@ -66,6 +74,30 @@ class Library {
     final f = templateFile(cat);
     if (await f.exists()) return (await f.readAsString()).trim();
     return defaultTemplates[cat] ?? defaultTemplates['自言自语']!;
+  }
+
+  (int, Map<String, List<(String, String)>>)? _qa;
+
+  /// 一键按钮表：模板/一键按钮.md 认得出就用它，否则用默认表。按文件修改时间缓存，外面改了下次就生效。
+  Map<String, List<(String, String)>> quickActionsTable() {
+    final f = quickActionsFile;
+    try {
+      if (!f.existsSync()) return quickActions;
+      final t = f.lastModifiedSync().millisecondsSinceEpoch;
+      if (_qa?.$1 != t) _qa = (t, parseQuickActions(f.readAsStringSync()) ?? quickActions);
+      return _qa!.$2;
+    } catch (_) {
+      return quickActions;
+    }
+  }
+
+  /// 我的写作风格（去掉说明后的内容；没写就是空）。
+  String writingStyle() {
+    try {
+      return styleFile.existsSync() ? cleanStyle(styleFile.readAsStringSync()) : '';
+    } catch (_) {
+      return '';
+    }
   }
 
   Future<List<String>> subjects() async {

@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'analyze.dart';
 import 'ask.dart';
 import 'cards.dart';
+import 'drafts.dart';
 import 'handoff.dart';
 import 'llm.dart';
 import 'md_view.dart';
@@ -34,15 +35,18 @@ class _HomeState extends State<Home> {
   String? _cat;
   final player = Player();
   final _search = TextEditingController();
-  final _askKey = GlobalKey(); // 搜索 / 按天 / 按类别来回切，对话不丢
+  final _askKey = GlobalKey<AskBoxState>(); // 搜索 / 按天 / 按类别来回切，对话不丢
   Timer? _debounce;
   String _query = '';
   List<SearchHit>? _hits;
+  List<DraftHit>? _dhits;
+  String? _draft; // 右栏正在看的成稿（文件路径）
 
   Store get store => widget.store;
 
   bool get searching => searchTerms(_query).isNotEmpty;
   List<SearchHit> get hits => _hits ??= searchScenes(store.scenes, _query);
+  List<DraftHit> get draftHits => _dhits ??= searchDrafts(store.drafts, _query);
 
   void _onSearch(String v) {
     _debounce?.cancel();
@@ -51,6 +55,7 @@ class _HomeState extends State<Home> {
         setState(() {
           _query = v;
           _hits = null;
+          _dhits = null;
         });
       }
     });
@@ -61,6 +66,7 @@ class _HomeState extends State<Home> {
     _search.clear();
     _query = '';
     _hits = null;
+    _dhits = null;
   }
 
   void clearSearch() => setState(_resetSearch);
@@ -72,6 +78,7 @@ class _HomeState extends State<Home> {
       _byCat = false;
       _day = s.dayKey;
       _sceneId = s.id;
+      _draft = null;
     });
     if (MediaQuery.sizeOf(context).width < 900) _openNarrow(s);
   }
@@ -86,7 +93,12 @@ class _HomeState extends State<Home> {
   }
 
   void _onStore() {
-    if (mounted) setState(() => _hits = null);
+    if (mounted) {
+      setState(() {
+        _hits = null;
+        _dhits = null;
+      });
+    }
   }
 
   @override
@@ -105,12 +117,24 @@ class _HomeState extends State<Home> {
   }
 
   String? get cat {
+    if (_cat == draftsKey) return draftsKey;
     final c = store.byCategory;
     if (_cat != null && c.containsKey(_cat)) return _cat;
     return c.isEmpty ? null : c.keys.first;
   }
 
-  List<Scene> get scenes => _byCat ? (cat == null ? [] : store.byCategory[cat]!) : (day == null ? [] : store.days[day]!);
+  List<Scene> get scenes =>
+      _byCat ? (cat == null || cat == draftsKey ? [] : store.byCategory[cat]!) : (day == null ? [] : store.days[day]!);
+
+  bool get inDrafts => _byCat && cat == draftsKey && !searching;
+
+  /// 右栏要显示的成稿：成稿列表里选中的（没选就第一篇），或者搜索结果里点了的那篇。
+  Draft? get draft {
+    if (searching) return draftHits.map((h) => h.draft).where((d) => d.path == _draft).firstOrNull;
+    if (!inDrafts) return null;
+    final l = store.drafts;
+    return l.where((d) => d.path == _draft).firstOrNull ?? l.firstOrNull;
+  }
 
   String get topic => _byCat ? 'cat:$cat' : 'day:$day';
 
@@ -125,17 +149,41 @@ class _HomeState extends State<Home> {
   void pickDay(String d) => setState(() {
         _day = d;
         _sceneId = null;
+        _draft = null;
       });
 
-  void pickCat(String c) => setState(() {
-        _cat = c;
-        _sceneId = null;
-      });
+  void pickCat(String c) {
+    if (c == draftsKey) store.refreshDrafts(); // 外面（Finder 里）改过、删过的也看得到
+    setState(() {
+      _cat = c;
+      _sceneId = null;
+      _draft = null;
+    });
+  }
 
   void setMode(bool byCat) => setState(() {
         _byCat = byCat;
         _sceneId = null;
+        _draft = null;
       });
+
+  void _pickScene(Scene s) => setState(() {
+        _sceneId = s.id;
+        _draft = null;
+      });
+
+  void _pickDraft(Draft d) => setState(() => _draft = d.path);
+
+  /// 右栏「拿去用」按钮：在对话里以这段为正在看的那段，发出对应的要求。手机上先退回列表，好看到对话。
+  void _quick(Scene s, String label, String prompt) {
+    final box = _askKey.currentState;
+    if (box == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('先回到按天或按类别的列表，再点一次')));
+      return;
+    }
+    if (MediaQuery.sizeOf(context).width < 900) Navigator.of(context).maybePop();
+    box.quick(s, label, prompt);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -176,20 +224,27 @@ class _HomeState extends State<Home> {
           width: (MediaQuery.sizeOf(context).width * 0.36).clamp(360, 470).toDouble(),
           child: searching
               ? SearchColumn(
-                  store: store, hits: hits, scenes: scenes, topic: topic, selected: scene?.id, top: 34,
-                  askKey: _askKey, onOpen: openFound, onPick: (s) => setState(() => _sceneId = s.id))
-              : _byCat
-                  ? CatColumn(store: store, cat: cat, scenes: scenes, selected: scene?.id,
-                      askKey: _askKey, onOpen: openFound, onPick: (s) => setState(() => _sceneId = s.id), top: 34)
-                  : DayColumn(
-                      store: store, day: day, scenes: scenes, selected: scene?.id, onHandoff: _handoff,
-                      askKey: _askKey, onOpen: openFound, onPick: (s) => setState(() => _sceneId = s.id)),
+                  store: store, hits: hits, scenes: scenes, topic: topic, selected: draft == null ? scene?.id : null, top: 34,
+                  draftHits: draftHits, selectedDraft: draft?.path, onPickDraft: _pickDraft,
+                  askKey: _askKey, onOpen: openFound, onPick: _pickScene)
+              : inDrafts
+                  ? DraftColumn(drafts: store.drafts, selected: draft?.path, onPick: _pickDraft, top: 34)
+                  : _byCat
+                      ? CatColumn(store: store, cat: cat, scenes: scenes, selected: scene?.id,
+                          askKey: _askKey, onOpen: openFound, onPick: _pickScene, top: 34)
+                      : DayColumn(
+                          store: store, day: day, scenes: scenes, selected: scene?.id, onHandoff: _handoff,
+                          askKey: _askKey, onOpen: openFound, onPick: _pickScene),
         ),
         const VerticalDivider(width: 1, color: K.line),
         Expanded(
-            child: scene == null
-                ? const Hint('sleep', '还没有内容', '有录音以后，点左边任意一段，这里看要点和逐字稿。')
-                : SceneDetail(scene: scene!, player: player, store: store, top: 36)),
+            child: draft != null
+                ? DraftDetail(draft: draft!, top: 36)
+                : inDrafts
+                    ? const Hint('wave', '还没有成稿', '在对话里让小耳写好东西，点回答下面的「存成稿」，就存到这里。')
+                    : scene == null
+                        ? const Hint('sleep', '还没有内容', '有录音以后，点左边任意一段，这里看要点和逐字稿。')
+                        : SceneDetail(scene: scene!, player: player, store: store, top: 36, onQuick: _quick)),
           ]),
         )),
       ]);
@@ -212,7 +267,13 @@ class _HomeState extends State<Home> {
                   Padding(
                     padding: const EdgeInsets.only(right: 8, top: 6, bottom: 6),
                     child: ChoiceChip(label: Text('${catFolder(e.key)} ${e.value.length}'), selected: e.key == cat, onSelected: (_) => pickCat(e.key)),
-                  )
+                  ),
+              if (_byCat)
+                Padding(
+                  padding: const EdgeInsets.only(right: 8, top: 6, bottom: 6),
+                  child: ChoiceChip(label: Text('$draftsKey ${store.drafts.length}'), selected: cat == draftsKey,
+                      onSelected: (_) => pickCat(draftsKey)),
+                )
               else
                 for (final d in store.days.keys)
                   Padding(
@@ -224,8 +285,11 @@ class _HomeState extends State<Home> {
         Expanded(
           child: searching
               ? SearchColumn(store: store, hits: hits, scenes: scenes, topic: topic, selected: null,
+                  draftHits: draftHits, onPickDraft: _openNarrowDraft,
                   askKey: _askKey, onOpen: openFound, onPick: _openNarrow)
-              : _byCat
+              : inDrafts
+                  ? DraftColumn(drafts: store.drafts, selected: null, onPick: _openNarrowDraft)
+                  : _byCat
                   ? CatColumn(store: store, cat: cat, scenes: scenes, selected: null,
                       askKey: _askKey, onOpen: openFound, onPick: _openNarrow)
                   : DayColumn(store: store, day: day, scenes: scenes, selected: null,
@@ -237,12 +301,18 @@ class _HomeState extends State<Home> {
                 builder: (_) => Scaffold(
                       appBar: AppBar(backgroundColor: K.paper, title: Text(s.title)),
                       body: Column(children: [
-                        Expanded(child: SceneDetail(scene: s, player: player, store: store)),
+                        Expanded(child: SceneDetail(scene: s, player: player, store: store, onQuick: _quick)),
                         ListenableBuilder(
                             listenable: player,
                             builder: (_, _) => player.stem == null ? const SizedBox() : PlayerBar(player: player)),
                       ]),
                     )));
+
+  void _openNarrowDraft(Draft d) => Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => Scaffold(
+            appBar: AppBar(backgroundColor: K.paper, title: Text(d.title)),
+            body: DraftDetail(draft: d),
+          )));
 }
 
 // ───────── 卡的状态（左栏卡片 / 手机顶栏共用）─────────
@@ -449,7 +519,7 @@ class CatNav extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = store.byCategory;
-    if (c.isEmpty) return const SizedBox();
+    final drafts = store.drafts.length;
     return ListView(padding: const EdgeInsets.symmetric(horizontal: 10), children: [
       for (final e in c.entries)
         Padding(
@@ -475,6 +545,28 @@ class CatNav extends StatelessWidget {
             ),
           ),
         ),
+      if (c.isNotEmpty) const Padding(padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6), child: Divider(height: 1, color: K.line)),
+      Material(
+        color: cat == draftsKey ? K.card : Colors.transparent,
+        borderRadius: BorderRadius.circular(10),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(10),
+          onTap: () => onPick(draftsKey),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            child: Row(children: [
+              Icon(Icons.edit_note, size: 16, color: cat == draftsKey ? K.accent : K.faint),
+              const SizedBox(width: 6),
+              Expanded(
+                  child: Text(draftsKey,
+                      style: TextStyle(fontWeight: cat == draftsKey ? FontWeight.w600 : FontWeight.w400,
+                          color: cat == draftsKey ? K.ink : K.mute))),
+              Text('$drafts',
+                  style: TextStyle(fontSize: 12, color: cat == draftsKey ? K.accent : K.faint, fontWeight: FontWeight.w600)),
+            ]),
+          ),
+        ),
+      ),
     ]);
   }
 }
@@ -710,9 +802,13 @@ class SearchColumn extends StatelessWidget {
   final void Function(Scene)? onOpen;
   final Key? askKey;
   final double top;
+  final List<DraftHit> draftHits;
+  final String? selectedDraft;
+  final void Function(Draft)? onPickDraft;
   const SearchColumn(
       {super.key, required this.store, required this.hits, required this.scenes, required this.topic, required this.selected,
-      required this.onPick, this.onOpen, this.askKey, this.top = 20});
+      required this.onPick, this.onOpen, this.askKey, this.top = 20, this.draftHits = const [], this.selectedDraft,
+      this.onPickDraft});
 
   @override
   Widget build(BuildContext context) {
@@ -725,7 +821,10 @@ class SearchColumn extends StatelessWidget {
           const SizedBox(height: 2),
           const Squiggle(width: 132),
           const SizedBox(height: 10),
-          _Stat(Icons.search, hits.isEmpty ? '没找到' : '找到 ${hits.length} 段'),
+          Wrap(spacing: 6, runSpacing: 6, children: [
+            _Stat(Icons.search, hits.isEmpty ? (draftHits.isEmpty ? '没找到' : '录音里没找到') : '找到 ${hits.length} 段'),
+            if (draftHits.isNotEmpty) _Stat(Icons.edit_note, '${draftHits.length} 篇成稿'),
+          ]),
         ]),
       ),
       Expanded(
@@ -733,7 +832,7 @@ class SearchColumn extends StatelessWidget {
           key: askKey, store: store, scenes: scenes, all: store.scenes, onOpen: onOpen,
           topic: topic, focus: _focus(found, selected),
           hint: '问问小耳：模糊说说那天大概聊了啥，让它帮你找',
-          child: hits.isEmpty
+          child: hits.isEmpty && draftHits.isEmpty
               ? const Center(
                   child: Padding(
                     padding: EdgeInsets.all(24),
@@ -741,6 +840,9 @@ class SearchColumn extends StatelessWidget {
                   ),
                 )
               : ListView(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6), children: [
+                  for (final h in draftHits)
+                    DraftRow(draft: h.draft, selected: h.draft.path == selectedDraft, onTap: () => onPickDraft?.call(h.draft),
+                        extra: SnippetText(h.snippet)),
                   for (final h in hits)
                     SceneRow(scene: h.scene, selected: h.scene.id == selected, onTap: () => onPick(h.scene), showDate: true,
                         extra: SnippetText(h.snippet)),
@@ -876,29 +978,33 @@ class AskBox extends StatefulWidget {
       {super.key, required this.store, required this.scenes, required this.topic, required this.child, this.focus,
       this.all = const [], this.onOpen, this.hint = '问问小耳：这天我答应了谁什么？也可以让它帮你找哪一段'});
   @override
-  State<AskBox> createState() => _AskBoxState();
+  State<AskBox> createState() => AskBoxState();
 }
 
 class _Msg {
   final bool me, error;
-  final String text; // 显示 / 拷贝用：去掉了 [[找到: …]]
-  final String raw; // 模型原话，进历史
+  final String text; // 显示 / 拷贝用：去掉了 [[找到: …]]；一键按钮发的只显示按钮名
+  final String raw; // 进历史的原话：模型的原回答 / 一键按钮背后的完整要求
   final List<String> found;
-  const _Msg(this.me, this.text, {this.error = false, String? raw, this.found = const []}) : raw = raw ?? text;
+  final String ask; // 小耳的回答：对应我那句要求（存成稿时记下来）
+  final Scene? focus; // 小耳的回答：当时正在看的那段
+  const _Msg(this.me, this.text, {this.error = false, String? raw, this.found = const [], this.ask = '', this.focus})
+      : raw = raw ?? text;
 }
 
-class _AskBoxState extends State<AskBox> {
+class AskBoxState extends State<AskBox> {
   final _q = TextEditingController();
   final _scroll = ScrollController();
   final _msgs = <_Msg>[];
   bool _busy = false, _open = false;
   int _gen = 0; // 清空 / 换了资料后，路上的回答作废
   bool _keep = false; // 点了找到的卡片跳到别的日子：这次换 topic 不清空对话
+  final _saved = Map<_Msg, String>.identity(); // 存成稿了的回答 → 文件路径
 
   @override
-  void didUpdateWidget(AskBox old) {
-    super.didUpdateWidget(old);
-    if (old.topic != widget.topic && !_keep) _clear();
+  void didUpdateWidget(AskBox oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.topic != widget.topic && !_keep) _clear();
   }
 
   void _openFound(Scene s) {
@@ -920,13 +1026,14 @@ class _AskBoxState extends State<AskBox> {
   void _clear() {
     _gen++;
     _msgs.clear();
+    _saved.clear();
     _busy = false;
     _open = false;
   }
 
   List<Turn> get _history => [
         for (var i = 0; i + 1 < _msgs.length; i++)
-          if (_msgs[i].me && !_msgs[i + 1].me && !_msgs[i + 1].error) Turn(_msgs[i].text, _msgs[i + 1].raw),
+          if (_msgs[i].me && !_msgs[i + 1].me && !_msgs[i + 1].error) Turn(_msgs[i].raw, _msgs[i + 1].raw),
       ];
 
   void _toBottom() => WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -935,17 +1042,31 @@ class _AskBoxState extends State<AskBox> {
         }
       });
 
-  Future<void> _ask() async {
-    final q = _q.text.trim();
+  /// 一键按钮：以 [s] 为正在看的这一段，发出 [prompt]（对话里显示成 [label]）。
+  void quick(Scene s, String label, String prompt) {
+    if (_busy) {
+      _snack('小耳还在写上一条，写完再点');
+      return;
+    }
+    _ask(show: label, prompt: prompt, focus: s);
+  }
+
+  /// 发一句：默认是输入框里打的；一键按钮给 [show]（显示的）+ [prompt]（发给模型的）+ [focus]。
+  Future<void> _ask({String? show, String? prompt, Scene? focus}) async {
+    final typed = show == null;
+    final q = typed ? _q.text.trim() : show;
     if (q.isEmpty || _busy) return;
-    final messages =
-        buildAskMessages(scenes: widget.scenes, focus: widget.focus, all: widget.all, history: _history, question: q);
+    final send = prompt ?? q;
+    final at = focus ?? widget.focus;
+    final store = widget.store;
+    final messages = buildAskMessages(scenes: widget.scenes, focus: at, all: widget.all, history: _history, question: send,
+        style: store.hasLib ? store.lib.writingStyle() : '');
     final gen = _gen;
     setState(() {
-      _msgs.add(_Msg(true, q));
+      _msgs.add(_Msg(true, q, raw: send));
       _busy = true;
       _open = true;
-      _q.clear();
+      if (typed) _q.clear();
     });
     _toBottom();
     _Msg answer;
@@ -954,7 +1075,7 @@ class _AskBoxState extends State<AskBox> {
       final (clean, ids) = parseFound(a);
       answer = a.isEmpty
           ? const _Msg(false, '模型没回内容，再问一次试试。', error: true)
-          : _Msg(false, clean.isEmpty && ids.isNotEmpty ? '找到这几段：' : clean, raw: a, found: ids);
+          : _Msg(false, clean.isEmpty && ids.isNotEmpty ? '找到这几段：' : clean, raw: a, found: ids, ask: q, focus: at);
     } catch (e) {
       answer = _Msg(false, '没问成：$e', error: true);
     }
@@ -969,6 +1090,26 @@ class _AskBoxState extends State<AskBox> {
   Future<void> _copy(String md) async {
     await Clipboard.setData(ClipboardData(text: md));
     if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已复制'), duration: Duration(seconds: 2)));
+  }
+
+  void _snack(String t) {
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(t), duration: const Duration(seconds: 3)));
+  }
+
+  /// 存成稿；已经存了就在 Finder 里显示（手机上提示存在哪）。
+  void _saveDraft(_Msg m) {
+    final saved = _saved[m];
+    if (saved != null) return revealDraft(context, saved);
+    final store = widget.store;
+    if (!store.hasLib) return _snack('资料文件夹还没准备好，没存成');
+    try {
+      final f = saveDraft(store.lib, answer: m.text, request: m.ask, source: m.focus);
+      setState(() => _saved[m] = f.path);
+      store.refreshDrafts();
+      if (!Platform.isMacOS) _snack('存好了：资料文件夹/$draftsKey/${f.uri.pathSegments.last}');
+    } catch (e) {
+      _snack('没存成：$e');
+    }
   }
 
   Widget _bubble(_Msg m) {
@@ -1006,15 +1147,24 @@ class _AskBoxState extends State<AskBox> {
               for (final s in [for (final id in m.found) _byId(id)].nonNulls)
                 Padding(padding: const EdgeInsets.only(top: 8, right: 6), child: FoundCard(scene: s, onTap: () => _openFound(s))),
               if (!m.error)
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: TextButton.icon(
+                Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+                  Tooltip(
+                    message: _saved[m] == null ? '存进资料文件夹的「$draftsKey」' : (Platform.isMacOS ? '在 Finder 里显示' : '看存在哪'),
+                    child: TextButton.icon(
+                      style: TextButton.styleFrom(
+                          foregroundColor: _saved[m] == null ? K.mute : K.accent, visualDensity: VisualDensity.compact),
+                      onPressed: () => _saveDraft(m),
+                      icon: Icon(_saved[m] == null ? Icons.save_alt_rounded : Icons.check_rounded, size: 15),
+                      label: Text(_saved[m] == null ? '存成稿' : '已存 ✓', style: const TextStyle(fontSize: 12.5)),
+                    ),
+                  ),
+                  TextButton.icon(
                     style: TextButton.styleFrom(foregroundColor: K.mute, visualDensity: VisualDensity.compact),
                     onPressed: () => _copy(m.text),
                     icon: const Icon(Icons.copy_rounded, size: 15),
                     label: const Text('拷贝', style: TextStyle(fontSize: 12.5)),
                   ),
-                ),
+                ]),
             ]),
           ),
         ),
@@ -1174,7 +1324,8 @@ class SceneDetail extends StatelessWidget {
   final Player player;
   final Store store;
   final double top; // 宽屏顶上留给拖动条
-  const SceneDetail({super.key, required this.scene, required this.player, required this.store, this.top = 24});
+  final void Function(Scene, String, String)? onQuick; // 「拿去用」按钮：(这段, 按钮名, 要求)
+  const SceneDetail({super.key, required this.scene, required this.player, required this.store, this.top = 24, this.onQuick});
 
   double _offsetOf(String clock) {
     final st = scene.start;
@@ -1239,6 +1390,7 @@ class SceneDetail extends StatelessWidget {
       SelectableText(s.event, style: const TextStyle(fontSize: 15, height: 1.7)),
       const SizedBox(height: 16),
       if (!s.noise) ...[NoteCard(scene: s, store: store), const SizedBox(height: 12)],
+      if (!s.noise && onQuick != null) ...[QuickBar(scene: s, store: store, onQuick: onQuick!), const SizedBox(height: 12)],
       if (s.body.isEmpty && s.minutes != null) ...[Minutes(scene: s), const SizedBox(height: 12)],
       if (s.body.isEmpty) LayoutBuilder(builder: (_, c) {
         final boxes = [
@@ -1544,4 +1696,183 @@ class PlayerBar extends StatelessWidget {
           ]),
         ),
       );
+}
+
+// ───────── 拿去用：每类的一键按钮 ─────────
+
+/// 笔记卡片下面一排按钮：按这段的类别列出（模板/一键按钮.md 改过就按改过的）。点了交给 [onQuick]。
+class QuickBar extends StatelessWidget {
+  final Scene scene;
+  final Store store;
+  final void Function(Scene, String, String) onQuick;
+  const QuickBar({super.key, required this.scene, required this.store, required this.onQuick});
+
+  @override
+  Widget build(BuildContext context) {
+    final table = store.hasLib ? store.lib.quickActionsTable() : quickActions;
+    final acts = table[scene.category] ?? const [];
+    if (acts.isEmpty) return const SizedBox();
+    return Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
+      const Text('拿去用', style: TextStyle(fontSize: 12.5, color: K.faint, fontWeight: FontWeight.w600)),
+      for (final (name, ask) in acts)
+        OutlinedButton.icon(
+          style: OutlinedButton.styleFrom(
+              foregroundColor: K.accent, side: const BorderSide(color: K.accentEdge), visualDensity: VisualDensity.compact,
+              padding: const EdgeInsets.symmetric(horizontal: 12), textStyle: const TextStyle(fontSize: 13)),
+          onPressed: () => onQuick(scene, name, ask),
+          icon: const Icon(Icons.auto_awesome_outlined, size: 15),
+          label: Text(name),
+        ),
+    ]);
+  }
+}
+
+// ───────── 成稿 ─────────
+
+/// 在 Finder 里显示这份成稿；手机上提示它存在哪。
+void revealDraft(BuildContext context, String path) {
+  if (Platform.isMacOS) {
+    Process.run('open', ['-R', path]);
+    return;
+  }
+  ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('存在：资料文件夹/$draftsKey/${File(path).uri.pathSegments.last}'), duration: const Duration(seconds: 4)));
+}
+
+class DraftRow extends StatelessWidget {
+  final Draft draft;
+  final bool selected;
+  final VoidCallback onTap;
+  final Widget? extra;
+  const DraftRow({super.key, required this.draft, required this.selected, required this.onTap, this.extra});
+
+  @override
+  Widget build(BuildContext context) {
+    final first = draft.body
+        .split('\n')
+        .map((l) => l.replaceAll(RegExp(r'^\s*#+\s*'), '').trim())
+        .firstWhere((l) => l.isNotEmpty && l != draft.title, orElse: () => '');
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Material(
+        color: selected ? K.cardDeep : Colors.transparent,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14), side: BorderSide(color: selected ? K.accentEdge : Colors.transparent)),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          hoverColor: const Color(0x0A000000),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 13, 14, 13),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              SizedBox(
+                  width: 52,
+                  child: Text('${int.parse(draft.when.substring(5, 7))}/${int.parse(draft.when.substring(8, 10))}',
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: selected ? K.accent : K.faint,
+                          fontFeatures: const [FontFeature.tabularFigures()]))),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Wrap(spacing: 8, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
+                    Text(draft.title, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+                    const Chip2(draftsKey),
+                  ]),
+                  if (extra == null && first.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(first, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13, color: K.mute, height: 1.5)),
+                  ],
+                  if (extra != null) ...[const SizedBox(height: 4), extra!],
+                ]),
+              ),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 中栏（按类别 → 成稿）：成稿/ 里的文件，新的在前。
+class DraftColumn extends StatelessWidget {
+  final List<Draft> drafts;
+  final String? selected;
+  final void Function(Draft) onPick;
+  final double top;
+  const DraftColumn({super.key, required this.drafts, required this.selected, required this.onPick, this.top = 20});
+
+  @override
+  Widget build(BuildContext context) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Padding(
+          padding: EdgeInsets.fromLTRB(24, top, 20, 12),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(draftsKey, style: K.title(26).copyWith(color: K.ink)),
+            const SizedBox(height: 2),
+            const Squiggle(width: 132),
+            const SizedBox(height: 10),
+            _Stat(Icons.edit_note, '${drafts.length} 篇'),
+            const SizedBox(height: 8),
+            const Text('在对话里让小耳写好的东西，点「存成稿」存在资料文件夹的「成稿」里', style: TextStyle(fontSize: 12, color: K.faint)),
+          ]),
+        ),
+        Expanded(
+          child: drafts.isEmpty
+              ? const Center(
+                  child: Padding(
+                    padding: EdgeInsets.all(24),
+                    child: Text('还没有成稿', style: TextStyle(color: K.mute, fontSize: 14)),
+                  ),
+                )
+              : ListView(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6), children: [
+                  for (final d in drafts) DraftRow(draft: d, selected: d.path == selected, onTap: () => onPick(d)),
+                ]),
+        ),
+      ]);
+}
+
+/// 右栏：一篇成稿（开头的元信息 + 正文），能拷贝正文、在 Finder 里显示。
+class DraftDetail extends StatelessWidget {
+  final Draft draft;
+  final double top;
+  const DraftDetail({super.key, required this.draft, this.top = 24});
+
+  @override
+  Widget build(BuildContext context) => ListView(key: PageStorageKey(draft.path), padding: EdgeInsets.fromLTRB(32, top, 32, 32), children: [
+        Wrap(spacing: 14, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
+          const Chip2(draftsKey),
+          Row(mainAxisSize: MainAxisSize.min, children: [
+            const Icon(Icons.schedule, size: 14, color: K.faint),
+            const SizedBox(width: 4),
+            Text(draft.when, style: const TextStyle(fontSize: 13, color: K.faint)),
+          ]),
+        ]),
+        const SizedBox(height: 10),
+        SelectableText(draft.title, style: K.title(26).copyWith(color: K.ink)),
+        const SizedBox(height: 2),
+        const Squiggle(width: 96),
+        const SizedBox(height: 8),
+        Row(children: [
+          TextButton.icon(
+            style: TextButton.styleFrom(foregroundColor: K.accent, visualDensity: VisualDensity.compact),
+            onPressed: () async {
+              await Clipboard.setData(ClipboardData(text: draft.body.trim()));
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('正文复制好了'), duration: Duration(seconds: 2)));
+              }
+            },
+            icon: const Icon(Icons.copy_rounded, size: 16),
+            label: const Text('拷贝正文'),
+          ),
+          TextButton.icon(
+            style: TextButton.styleFrom(foregroundColor: K.mute, visualDensity: VisualDensity.compact),
+            onPressed: () => revealDraft(context, draft.path),
+            icon: const Icon(Icons.folder_open_outlined, size: 16),
+            label: Text(Platform.isMacOS ? '在 Finder 里显示' : '存在哪'),
+          ),
+        ]),
+        const SizedBox(height: 8),
+        Container(
+          padding: const EdgeInsets.fromLTRB(20, 16, 16, 16),
+          decoration: BoxDecoration(color: K.card, borderRadius: BorderRadius.circular(16), border: Border.all(color: K.accentEdge)),
+          child: MdView(draft.md),
+        ),
+      ]);
 }

@@ -103,16 +103,18 @@ class MdView extends StatelessWidget {
     );
   }
 
-  /// **加粗** 和 `代码` 两种就够了。
+  /// **加粗**、`代码`、[链接](地址)（只显示文字）就够了。
   Widget _rich(String s, TextStyle base) {
     final spans = <TextSpan>[];
-    final re = RegExp(r'\*\*(.+?)\*\*|`(.+?)`');
+    final re = RegExp(r'\*\*(.+?)\*\*|`(.+?)`|\[([^\]]+)\]\((?:<[^>]*>|[^)\s]*)\)');
     var at = 0;
     for (final m in re.allMatches(s)) {
       if (m.start > at) spans.add(TextSpan(text: s.substring(at, m.start)));
       spans.add(m[1] != null
           ? TextSpan(text: m[1], style: const TextStyle(fontWeight: FontWeight.w700))
-          : TextSpan(text: m[2], style: const TextStyle(color: K.mute)));
+          : m[2] != null
+              ? TextSpan(text: m[2], style: const TextStyle(color: K.mute))
+              : TextSpan(text: m[3], style: const TextStyle(color: K.accent)));
       at = m.end;
     }
     if (at < s.length) spans.add(TextSpan(text: s.substring(at)));

@@ -67,7 +67,7 @@ String backgroundBlock(List<Scene> scenes, int max) {
 
 /// 拼 messages：system（提示词 + 资料）→ 前面几轮 → 这次的问题。
 /// 资料：正在看的那段放最前、不截断；其余场景按剩下的额度放；[all] 是所有日子的场景（新的在前），只给目录，用来帮我找记录。
-/// 历史太长只丢最早的轮次。
+/// 历史太长只丢最早的轮次。[style] 是我的写作风格（模板/我的写作风格.md 去掉说明后的内容），有才放。
 List<Map<String, String>> buildAskMessages({
   required List<Scene> scenes,
   Scene? focus,
@@ -79,6 +79,7 @@ List<Map<String, String>> buildAskMessages({
   int focusMax = 40000,
   int backgroundMin = 10000,
   int historyMax = 24000,
+  String style = '',
 }) {
   final parts = <String>[];
   if (focus != null) parts.add(focusBlock(focus, focusMax: focusMax));
@@ -101,11 +102,18 @@ List<Map<String, String>> buildAskMessages({
     kept.insert(0, t);
   }
   return [
-    {'role': 'system', 'content': '$chatPrompt\n\n${parts.join('\n\n')}'},
+    {'role': 'system', 'content': '$chatPrompt\n\n${styleBlock(style)}${parts.join('\n\n')}'},
     for (final t in kept) ...[
       {'role': 'user', 'content': t.q},
       {'role': 'assistant', 'content': t.a},
     ],
     {'role': 'user', 'content': question},
   ];
+}
+
+/// 系统提示词里的「我的写作风格」一节（后面跟两个换行）；没内容就是空串。
+String styleBlock(String style, {int max = 6000}) {
+  final t = style.trim();
+  if (t.isEmpty) return '';
+  return '## 我的写作风格（写文章 / 朋友圈 / 演讲稿等创作时照这个写；回答事实问题时不用管）\n${t.length > max ? t.substring(0, max) : t}\n\n';
 }

@@ -9,6 +9,7 @@ import 'handoff.dart';
 import 'llm.dart';
 import 'store.dart';
 import 'sync.dart';
+import 'templates.dart';
 import 'theme.dart';
 
 void showSettings(BuildContext context, Store store, Syncer syncer) {
@@ -101,7 +102,7 @@ void showSettings(BuildContext context, Store store, Syncer syncer) {
               const SizedBox(height: 16),
               const Text('资料文件夹', style: TextStyle(fontWeight: FontWeight.w600)),
               const SizedBox(height: 2),
-              const Text('整理好的笔记、逐字稿、录音都在这，是普通文件，不开 App 也能看。「模板」文件夹里改每一类怎么整理。',
+              const Text('整理好的笔记、逐字稿、录音都在这，是普通文件，不开 App 也能看。「模板」文件夹里改每一类怎么整理；「改写作风格」写你的口吻，小耳写文章、朋友圈时照着写。',
                   style: TextStyle(color: K.mute, fontSize: 13)),
               TextField(controller: folder, enabled: Platform.isMacOS, style: const TextStyle(fontSize: 14)),
               if (Platform.isMacOS)
@@ -115,6 +116,15 @@ void showSettings(BuildContext context, Store store, Syncer syncer) {
                     onPressed: () => Process.run('open', ['${store.lib.path}/模板']),
                     icon: const Icon(Icons.edit_note, size: 16),
                     label: const Text('改模板'),
+                  ),
+                  TextButton.icon(
+                    onPressed: () async {
+                      final f = store.lib.styleFile;
+                      if (!await f.exists()) await f.writeAsString(defaultStyle);
+                      await Process.run('open', [f.path]);
+                    },
+                    icon: const Icon(Icons.draw_outlined, size: 16),
+                    label: const Text('改写作风格'),
                   ),
                   TextButton.icon(
                     onPressed: () async {
