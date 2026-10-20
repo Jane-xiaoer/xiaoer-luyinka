@@ -104,7 +104,8 @@ void showSettings(BuildContext context, Store store, Syncer syncer) {
               const SizedBox(height: 2),
               const Text('整理好的笔记、逐字稿、录音都在这，是普通文件，不开 App 也能看。「模板」文件夹里改每一类怎么整理；「改写作风格」写你的口吻，小耳写文章、朋友圈时照着写；「改常用词」写你常提到的人名、品牌，整理时照它纠正转写里的错字。',
                   style: TextStyle(color: K.mute, fontSize: 13)),
-              TextField(controller: folder, enabled: Platform.isMacOS, style: const TextStyle(fontSize: 14)),
+              // 手机上这一栏改不了（disabled 的单行框不能横着滚），路径又长：折行显示全
+              TextField(controller: folder, enabled: Platform.isMacOS, maxLines: Platform.isMacOS ? 1 : null, style: const TextStyle(fontSize: 14)),
               if (Platform.isMacOS)
                 Row(children: [
                   TextButton.icon(

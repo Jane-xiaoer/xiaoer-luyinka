@@ -40,9 +40,14 @@ class Analyzer {
       }
     }
     raw.sort((x, y) => (x['_a'] as double).compareTo(y['_a'] as double));
+    // 钟点只标每句的开头：最后一段按上面算会停在最后一句开口的时刻（整条只有一句时就成了 09:30–09:30），
+    // 云端给了录音总长就让最后一段一直算到录音结束。
+    final total = (res['seconds'] as num?)?.toDouble();
     final out = <Map<String, dynamic>>[];
     for (final (i, s) in raw.indexed) {
-      final a = s['_a'] as double, b = s['_b'] as double;
+      final a = s['_a'] as double;
+      var b = s['_b'] as double;
+      if (i == raw.length - 1 && total != null && total > b) b = total;
       final next = i + 1 < raw.length ? raw[i + 1]['_a'] as double : double.infinity;
       final until = next > b + 1 ? next : b + 1;
       final start = t0.add(Duration(seconds: a.round())), end = t0.add(Duration(seconds: b.round()));

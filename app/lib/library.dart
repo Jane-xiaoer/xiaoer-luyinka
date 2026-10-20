@@ -144,7 +144,7 @@ class Library {
   /// 一段的笔记文件（换了标题 / 类别就把旧文件删掉）。返回新文件路径。
   Future<String> writeNote(Scene s) async {
     final old = s.d['file'] as String?;
-    final f = File('$path/${catFolder(s.category)}/${_day(s.start)} ${_hm(s.start, '.')} ${safe(s.title)}.md');
+    final f = File('$path/${noteRel(s)}');
     if (old != null && old != f.path) {
       final o = File(old);
       if (await o.exists()) await o.delete();
@@ -156,6 +156,9 @@ class Library {
     if (catKey(s.category) == '个人感悟' && s.body.isNotEmpty) await _appendIdeas(s);
     return f.path;
   }
+
+  /// 一段的笔记在资料文件夹里的相对路径。
+  static String noteRel(Scene s) => '${catFolder(s.category)}/${_day(s.start)} ${_hm(s.start, '.')} ${safe(s.title)}.md';
 
   /// 这一段不再算「现场调研 · [subject]」或「个人感悟」了：从调研对象文件 / 观点库里拿掉它那块。
   Future<void> forget(String id, {String subject = '', bool ideas = false}) async {
@@ -197,8 +200,9 @@ class Library {
   Future<void> writeDay(String day, List<Scene> scenes) async {
     final b = StringBuffer('# $day\n\n');
     for (final s in scenes) {
-      final f = s.d['file'] as String?;
-      final link = f == null ? '' : '（[笔记](<../${f.substring(path.length + 1)}>)）';
+      // 索引里记的是绝对路径；资料文件夹换过地方（搬到别的文件夹、从电脑拷到手机）后它指着旧位置，
+      // 拿来截相对路径会截错甚至越界，所以按这一段现在该在的位置算。
+      final link = s.d['file'] == null ? '' : '（[笔记](<../${noteRel(s)}>)）';
       b.writeln('- **${_hm(s.start)}–${_hm(s.end)}** [${catKey(s.category)}] ${s.title}$link');
       if (s.event.isNotEmpty) b.writeln('  ${s.event}');
       for (final t in [...s.actions, ...s.reminders]) {

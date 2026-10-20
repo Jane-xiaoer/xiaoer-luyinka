@@ -65,6 +65,30 @@ void main() {
     expect(again.firstWhere((s) => s['category'] == '现场调研')['body'], contains('有以前的'));
   });
 
+  test('最后一段算到录音结束（整条只有一句也不会成 09:30–09:30）', () async {
+    Future<String> one(String system, String user) async => system.contains('"scenes"')
+        ? jsonEncode({'scenes': [{'start': '09:30:00', 'end': '09:30:00', 'category': '开会', 'title': '排期会', 'event': '定排期。'}]})
+        : '## 结果';
+    final res = {'start': '2026-10-19T09:30:00+08:00', 'seconds': 81.2, 'lines': [['09:30:00', '人都到齐了，我们开始，今天就三件事。' * 10]]};
+    final s = (await Analyzer(lib, one).run('note20261019-093000', res)).single;
+    expect(s['end'], '2026-10-19T09:31:21');
+    expect(noteMd(Scene(s, 'note20261019-093000')), contains('09:30–09:31（1 分钟）'));
+
+    // 没给录音总长（外面放进来的）：照旧按钟点
+    final noLen = (await Analyzer(lib, one).run('x', {...res}..remove('seconds'))).single;
+    expect(noLen['end'], '2026-10-19T09:30:00');
+  });
+
+  test('资料文件夹换过地方：每日时间线照样写、链接指向现在的笔记', () async {
+    final s = Scene({
+      'id': 'x', 'start': '2026-10-19T09:30:00', 'end': '2026-10-19T09:31:21', 'category': '开会', 'title': '排期会',
+      'file': '/old/会议纪要/2026-10-19 09.30 排期会.md', // 比现在的资料文件夹路径短：以前截相对路径会越界
+    }, 'note20261019-093000');
+    await lib.writeDay('2026-10-19', [s]);
+    expect(File('${lib.path}/每日/2026-10-19.md').readAsStringSync(),
+        contains('（[笔记](<../会议纪要/2026-10-19 09.30 排期会.md>)）'));
+  });
+
   test('改了模板就按改过的整理', () async {
     await lib.templateFile('开会').writeAsString('只写一句话总结');
     String? seen;
