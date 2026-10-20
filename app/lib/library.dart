@@ -7,6 +7,7 @@
 //   录音/<录音>.m4a                        播放用
 //   模板/<类别>.md                         各类别的整理方式，可以直接改
 //   模板/一键按钮.md、模板/我的写作风格.md     「拿去用」按钮的要求、让小耳写东西时照着的口吻
+//   模板/常用词.md                         常提到的人名 / 品牌 / 专有名词，整理时照它纠正转写里的错字
 //   成稿/2026-10-19 14.05 标题.md           对话里小耳写好、点了「存成稿」的东西
 //   .xiaoer/<录音>.json                    App 用的索引（删了 App 里就看不到那条，但上面的文件还在）
 import 'dart:convert';
@@ -40,6 +41,7 @@ class Library {
   File get ideasFile => File('$path/个人感悟/观点库.md');
   File get quickActionsFile => File('$path/模板/一键按钮.md');
   File get styleFile => File('$path/模板/我的写作风格.md');
+  File get vocabFile => File('$path/模板/常用词.md');
 
   Future<void> ensure() async {
     for (final d in ['.xiaoer', '录音', '逐字稿', '每日', '模板', '成稿']) {
@@ -51,6 +53,7 @@ class Library {
     }
     if (!await quickActionsFile.exists()) await quickActionsFile.writeAsString(quickActionsMd(quickActions));
     if (!await styleFile.exists()) await styleFile.writeAsString(defaultStyle);
+    if (!await vocabFile.exists()) await vocabFile.writeAsString(defaultVocab);
     final readme = File('$path/说明.md');
     if (!await readme.exists()) {
       await readme.writeAsString('''# 小耳录音卡 · 资料文件夹
@@ -65,6 +68,7 @@ class Library {
 - 逐字稿/、录音/：全文和原声
 - 模板/：每一类怎么整理。直接改这些 .md，下次整理就按你改过的来
 - 模板/一键按钮.md：每一类下面「拿去用」按钮让小耳写什么；模板/我的写作风格.md：让小耳写文章、朋友圈时照着的口吻
+- 模板/常用词.md：你常提到的人名、品牌、专有名词，整理时照它把转写里听错的字改回来
 - 成稿/：在对话里让小耳写好的文章、朋友圈、纪要消息，点「存成稿」存在这
 ''');
     }
@@ -95,6 +99,15 @@ class Library {
   String writingStyle() {
     try {
       return styleFile.existsSync() ? cleanStyle(styleFile.readAsStringSync()) : '';
+    } catch (_) {
+      return '';
+    }
+  }
+
+  /// 常用词（去掉说明后的内容；没写就是空）。
+  String vocab() {
+    try {
+      return vocabFile.existsSync() ? cleanVocab(vocabFile.readAsStringSync()) : '';
     } catch (_) {
       return '';
     }
@@ -142,6 +155,16 @@ class Library {
     if (catKey(s.category) == '现场调研' && s.subject.isNotEmpty) await _appendSubject(s);
     if (catKey(s.category) == '个人感悟' && s.body.isNotEmpty) await _appendIdeas(s);
     return f.path;
+  }
+
+  /// 这一段不再算「现场调研 · [subject]」或「个人感悟」了：从调研对象文件 / 观点库里拿掉它那块。
+  Future<void> forget(String id, {String subject = '', bool ideas = false}) async {
+    for (final f in [if (subject.isNotEmpty) subjectFile(subject), if (ideas) ideasFile]) {
+      if (!await f.exists()) continue;
+      final t = await f.readAsString();
+      final out = t.replaceAll(RegExp('\\n*<!-- ${RegExp.escape(id)} -->[\\s\\S]*?<!-- /${RegExp.escape(id)} -->\\n?'), '\n');
+      if (out != t) await f.writeAsString('${out.trimRight()}\n');
+    }
   }
 
   Future<void> _appendSubject(Scene s) async {

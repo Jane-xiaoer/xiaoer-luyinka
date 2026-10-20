@@ -171,6 +171,32 @@ class Store extends ChangeNotifier {
     await putResult(s.stem, res);
   }
 
+  /// 手动改一段的类别：换成 [cat]、按新类别的模板重新整理（[note] 就是 Analyzer.note），再写回。
+  /// 笔记文件跟着挪到新类别的文件夹；改成杂音就删掉笔记文件。整理失败时这段原样不动，错误照抛。
+  Future<void> changeCategory(Scene s, String cat, Future<String> Function(Scene) note, {String subject = ''}) async {
+    final before = Map<String, dynamic>.from(s.d);
+    final oldCat = s.category, oldSubject = s.subject;
+    s.d['category'] = cat;
+    s.d['subject'] = cat == '现场调研' ? subject.trim() : '';
+    try {
+      s.d['body'] = await note(s);
+    } catch (_) {
+      s.d
+        ..clear()
+        ..addAll(before);
+      rethrow;
+    }
+    if (oldCat == '现场调研' && oldSubject.isNotEmpty && (cat != oldCat || s.subject != oldSubject)) {
+      await lib.forget(s.id, subject: oldSubject);
+    }
+    if (oldCat == '个人感悟' && cat != oldCat) await lib.forget(s.id, ideas: true);
+    if (cat == noiseCat) {
+      final f = s.d.remove('file') as String?;
+      if (f != null && await File(f).exists()) await File(f).delete();
+    }
+    await putScene(s);
+  }
+
   /// 所有场景（不含杂音），新的在前。
   List<Scene> get scenes {
     final all = [for (final l in _scenes.values) ...l.where((s) => !s.noise)];

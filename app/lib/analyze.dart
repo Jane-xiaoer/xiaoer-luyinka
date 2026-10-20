@@ -27,10 +27,11 @@ class Analyzer {
     final t0 = startOf(res, lines);
     final secs = [for (final l in lines) _offset(t0, l[0])];
     final subjects = await lib.subjects();
+    final vocab = lib.vocab();
     final raw = <Map<String, dynamic>>[];
     for (final (lo, hi) in windows(lines)) {
       final user = [for (var i = lo; i <= hi; i++) '[${lines[i][0]}] ${lines[i][1]}'].join('\n');
-      for (final s in parseScenes(await chat(cutPrompt(subjects), user))) {
+      for (final s in parseScenes(await chat(cutPrompt(subjects, vocab: vocab), user))) {
         var a = _clamp(t0, s['start'], secs[lo], secs[hi]), b = _clamp(t0, s['end'], secs[lo], secs[hi]);
         if (b < a) (a, b) = (b, a);
         raw.add(s
@@ -90,7 +91,7 @@ class Analyzer {
       final before = await lib.subjectHistory(s.subject, except: s.id);
       if (before.isNotEmpty) user += '\n\n## 以前对「${s.subject}」的调研记录（当背景，用来对比，不要抄进这次的关键信息）\n$before';
     }
-    final out = await chat('$notePreamble${await lib.template(cat)}', user);
+    final out = await chat(notePrompt(await lib.template(cat), vocab: lib.vocab()), user);
     return out.replaceAll(RegExp(r'^```(markdown|md)?\s*|\s*```$'), '').trim();
   }
 }

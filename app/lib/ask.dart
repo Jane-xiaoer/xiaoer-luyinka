@@ -36,8 +36,8 @@ String focusBlock(Scene s, {int focusMax = 40000}) {
   return out.length > focusMax ? out.substring(0, focusMax) : out;
 }
 
-/// 其余场景当背景：整理好的笔记优先；放得下再带逐字稿。
-String backgroundBlock(List<Scene> scenes, int max) {
+/// 其余场景当背景：整理好的笔记优先；放得下再带逐字稿（[withText] 为 false 就只给笔记）。
+String backgroundBlock(List<Scene> scenes, int max, {bool withText = true}) {
   if (scenes.isEmpty || max <= 0) return '';
   final ctx = [
     for (final s in scenes)
@@ -56,7 +56,7 @@ String backgroundBlock(List<Scene> scenes, int max) {
       },
   ];
   var json = jsonEncode(ctx);
-  if (json.length < max * 2 ~/ 3) {
+  if (withText && json.length < max * 2 ~/ 3) {
     final full = jsonEncode([
       for (final (i, s) in scenes.indexed) {...ctx[i], 'text': s.text},
     ]);
@@ -68,6 +68,8 @@ String backgroundBlock(List<Scene> scenes, int max) {
 /// 拼 messages：system（提示词 + 资料）→ 前面几轮 → 这次的问题。
 /// 资料：正在看的那段放最前、不截断；其余场景按剩下的额度放；[all] 是所有日子的场景（新的在前），只给目录，用来帮我找记录。
 /// 历史太长只丢最早的轮次。[style] 是我的写作风格（模板/我的写作风格.md 去掉说明后的内容），有才放。
+/// [lookup] 是我打的这句话：拿它在 [all] 的笔记和逐字稿里粗筛，前几段的原文片段附在目录后面（找东西时靠它）。
+/// [withText] 为 false 时只给笔记：背景不带逐字稿，也不附原文片段（「见面前帮我准备」用）。
 List<Map<String, String>> buildAskMessages({
   required List<Scene> scenes,
   Scene? focus,
@@ -80,6 +82,9 @@ List<Map<String, String>> buildAskMessages({
   int backgroundMin = 10000,
   int historyMax = 24000,
   String style = '',
+  String lookup = '',
+  int roughMax = 8000,
+  bool withText = true,
 }) {
   final parts = <String>[];
   if (focus != null) parts.add(focusBlock(focus, focusMax: focusMax));
@@ -88,11 +93,15 @@ List<Map<String, String>> buildAskMessages({
       if (focus == null || s.id != focus.id || s.stem != focus.stem) s,
   ];
   final used = parts.fold<int>(0, (a, p) => a + p.length);
-  final bg = backgroundBlock(rest, (materialMax - used).clamp(backgroundMin, materialMax));
+  final bg = backgroundBlock(rest, (materialMax - used).clamp(backgroundMin, materialMax), withText: withText);
   if (bg.isNotEmpty) parts.add('## ${focus == null ? '我的录音记录' : '其余录音记录（背景）'}（JSON）\n$bg');
   if (parts.isEmpty) parts.add('## 我的录音记录\n（这里还没有记录）');
   final cat = catalogBlock(all, max: catalogMax);
   if (cat.isNotEmpty) parts.add('## 全部记录目录（所有日子，新的在前；每行：id | 日期 钟点 | 类别 | 标题 | 事件 | 人物 | 地点）\n$cat');
+  final rough = withText && lookup.trim().isNotEmpty ? roughBlock(all, lookup, max: roughMax) : '';
+  if (rough.isNotEmpty) {
+    parts.add('## 可能相关的原文片段（按我这句话里的词，在所有记录的笔记和逐字稿里粗筛出来的，可能有不相干的；每条：id | 日期 钟点 | 标题，下一行是命中处的原文）\n$rough');
+  }
 
   final kept = <Turn>[];
   var size = 0;
