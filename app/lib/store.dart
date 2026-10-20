@@ -213,6 +213,9 @@ class Store extends ChangeNotifier {
     await putScene(s);
   }
 
+  /// 一条录音的所有段（含杂音），整条拷贝逐字稿用。
+  List<Scene> scenesOf(String stem) => [...?_scenes[stem]];
+
   /// 所有场景（不含杂音），新的在前。
   List<Scene> get scenes {
     final all = [for (final l in _scenes.values) ...l.where((s) => !s.noise)];

@@ -22,6 +22,7 @@ import 'sync.dart';
 import 'templates.dart';
 import 'theme.dart';
 import 'todos.dart';
+import 'transcript.dart';
 import 'weekly.dart';
 
 class Home extends StatefulWidget {
@@ -1673,13 +1674,46 @@ int _secs(String clock) {
   return p[0] * 3600 + p[1] * 60 + (p.length > 2 ? p[2] : 0);
 }
 
-class SceneDetail extends StatelessWidget {
+class SceneDetail extends StatefulWidget {
   final Scene scene;
   final Player player;
   final Store store;
   final double top; // 宽屏顶上留给拖动条
   final void Function(Scene, String, String)? onQuick; // 「拿去用」按钮：(这段, 按钮名, 要求)
   const SceneDetail({super.key, required this.scene, required this.player, required this.store, this.top = 24, this.onQuick});
+
+  /// 「笔记 | 逐字稿」切换。放在类上而不是 State 里：点别的段时保持上次选的。
+  static final transcriptTab = ValueNotifier<bool>(false);
+  @override
+  State<SceneDetail> createState() => _SceneDetailState();
+}
+
+class _SceneDetailState extends State<SceneDetail> {
+  Scene get scene => widget.scene;
+  Player get player => widget.player;
+  Store get store => widget.store;
+
+  Future<void> _copy(String t) async {
+    await Clipboard.setData(ClipboardData(text: t));
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('逐字稿复制好了（${transcriptChars(t)} 字）'), duration: const Duration(seconds: 2)));
+    }
+  }
+
+  Widget _btn(String label, IconData icon, VoidCallback? onPressed, {String? tip}) {
+    final b = OutlinedButton.icon(
+      style: OutlinedButton.styleFrom(
+          foregroundColor: K.accent, side: const BorderSide(color: K.accentEdge), visualDensity: VisualDensity.compact,
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap, minimumSize: const Size(0, 28),
+          padding: const EdgeInsets.symmetric(horizontal: 10), textStyle: const TextStyle(fontSize: 12.5),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(99))),
+      onPressed: onPressed,
+      icon: Icon(icon, size: 15),
+      label: Text(label),
+    );
+    return tip == null ? b : Tooltip(message: tip, child: b);
+  }
 
   double _offsetOf(String clock) {
     final st = scene.start;
@@ -1715,8 +1749,52 @@ class SceneDetail extends StatelessWidget {
         child: Text(clock.substring(0, 5), style: const TextStyle(color: K.accent, fontFeatures: [FontFeature.tabularFigures()])),
       );
 
+  /// 逐字稿每一行：点时间从那里听，正在播的那行高亮。
+  Widget _lines(Scene s, TextStyle body) => ListenableBuilder(
+        listenable: player,
+        builder: (_, _) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          for (final line in s.text)
+            Container(
+              margin: const EdgeInsets.only(bottom: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                  color: player.stem == s.stem && player.label == line[0] ? K.accentSoft : Colors.transparent,
+                  borderRadius: BorderRadius.circular(6)),
+              child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                _ts(line[0]),
+                const SizedBox(width: 8),
+                Expanded(child: SelectableText(line[1], style: body)),
+              ]),
+            ),
+        ]),
+      );
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ValueListenableBuilder<bool>(
+        valueListenable: SceneDetail.transcriptTab,
+        builder: (context, tx, _) => _build(context, tx),
+      );
+
+  /// 这一段的逐字稿拷贝按钮：纯文字 / 带时间 / 整条录音；Mac 上还有「在 Finder 显示」。
+  Widget _tools(Scene s) {
+    final plain = transcriptText(s);
+    final same = store.scenesOf(s.stem);
+    final whole = recordingTranscript(same.isEmpty ? [s] : same);
+    final file = store.hasLib ? store.lib.transcript(s.stem) : null;
+    return Wrap(spacing: 6, runSpacing: 6, children: [
+      _btn('拷贝', Icons.copy_rounded, plain.isEmpty ? null : () => _copy(plain), tip: '这一段，纯文字，一行一句'),
+      _btn('带时间拷贝', Icons.schedule, plain.isEmpty ? null : () => _copy(transcriptText(s, times: true)),
+          tip: '每行前面带 [时:分:秒]'),
+      _btn('整条录音', Icons.library_books_outlined, whole.isEmpty ? null : () => _copy(whole),
+          tip: '这一段所在整条录音的全部逐字稿，按段分开'),
+      if (Platform.isMacOS && file != null)
+        _btn('在 Finder 显示', Icons.folder_open_outlined,
+            () => file.existsSync() ? Process.run('open', ['-R', file.path]) : Process.run('open', [file.parent.path]),
+            tip: '逐字稿/${s.stem}.md'),
+    ]);
+  }
+
+  Widget _build(BuildContext context, bool tx) {
     final s = scene;
     Widget meta(IconData i, String t) => Row(mainAxisSize: MainAxisSize.min, children: [
           Icon(i, size: 14, color: K.faint),
@@ -1728,7 +1806,7 @@ class SceneDetail extends StatelessWidget {
       for (final r in s.reminders) '${r['text']}${(r['when'] ?? '').toString().isNotEmpty ? ' · ${r['when']}' : ''}',
     ];
     const body = TextStyle(fontSize: 14, height: 1.7);
-    return ListView(key: PageStorageKey(s.id), padding: EdgeInsets.fromLTRB(32, top, 32, 32), children: [
+    final header = <Widget>[
       Wrap(spacing: 14, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
         CategoryChip(scene: s, store: store),
         meta(Icons.schedule, '${hm(s.start)}–${hm(s.end)} · ${duration(s.end.difference(s.start))}'),
@@ -1742,7 +1820,40 @@ class SceneDetail extends StatelessWidget {
       const Squiggle(width: 96),
       const SizedBox(height: 8),
       SelectableText(s.event, style: const TextStyle(fontSize: 15, height: 1.7)),
-      if (!s.noise && onQuick != null) ...[const SizedBox(height: 10), QuickBar(scene: s, store: store, onQuick: onQuick!)],
+      const SizedBox(height: 12),
+      Align(
+        alignment: Alignment.centerLeft,
+        child: SegmentedButton<bool>(
+          segments: const [
+            ButtonSegment(value: false, label: Text('笔记'), icon: Icon(Icons.notes, size: 16)),
+            ButtonSegment(value: true, label: Text('逐字稿'), icon: Icon(Icons.subject, size: 16)),
+          ],
+          selected: {tx},
+          showSelectedIcon: false,
+          style: SegmentedButton.styleFrom(
+              visualDensity: VisualDensity.compact, selectedForegroundColor: K.accent,
+              selectedBackgroundColor: K.accentSoft, side: const BorderSide(color: K.accentEdge)),
+          onSelectionChanged: (v) => SceneDetail.transcriptTab.value = v.first,
+        ),
+      ),
+    ];
+    if (tx) {
+      return ListView(key: PageStorageKey('${s.id}/逐字稿'), padding: EdgeInsets.fromLTRB(32, widget.top, 32, 32), children: [
+        ...header,
+        const SizedBox(height: 14),
+        _tools(s),
+        const SizedBox(height: 8),
+        const Text('点时间从那里听', style: TextStyle(fontSize: 12, color: K.faint)),
+        const SizedBox(height: 8),
+        if (s.text.isEmpty) const Text('这段没有逐字稿。', style: TextStyle(color: K.faint)) else _lines(s, body),
+      ]);
+    }
+    return ListView(key: PageStorageKey(s.id), padding: EdgeInsets.fromLTRB(32, widget.top, 32, 32), children: [
+      ...header,
+      if (!s.noise && widget.onQuick != null) ...[
+        const SizedBox(height: 10),
+        QuickBar(scene: s, store: store, onQuick: widget.onQuick!),
+      ],
       const SizedBox(height: 16),
       if (!s.noise) ...[NoteCard(scene: s, store: store), const SizedBox(height: 12)],
       if (s.body.isEmpty && s.minutes != null) ...[Minutes(scene: s), const SizedBox(height: 12)],
@@ -1781,30 +1892,13 @@ class SceneDetail extends StatelessWidget {
         ]),
       ],
       const SizedBox(height: 18),
-      const Row(children: [
-        Label('逐字稿'),
-        SizedBox(width: 10),
-        Text('点时间从那里听', style: TextStyle(fontSize: 12, color: K.faint)),
+      Wrap(spacing: 10, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
+        const Label('逐字稿'),
+        const Text('点时间从那里听', style: TextStyle(fontSize: 12, color: K.faint)),
+        _tools(s),
       ]),
       const SizedBox(height: 8),
-      ListenableBuilder(
-        listenable: player,
-        builder: (_, _) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          for (final line in s.text)
-            Container(
-              margin: const EdgeInsets.only(bottom: 6),
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                  color: player.stem == s.stem && player.label == line[0] ? K.accentSoft : Colors.transparent,
-                  borderRadius: BorderRadius.circular(6)),
-              child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                _ts(line[0]),
-                const SizedBox(width: 8),
-                Expanded(child: SelectableText(line[1], style: body)),
-              ]),
-            ),
-        ]),
-      ),
+      _lines(s, body),
     ]);
   }
 }
