@@ -9,6 +9,7 @@ import 'card/protocol.dart';
 import 'cloud.dart';
 import 'llm.dart';
 import 'store.dart';
+import 'todos.dart';
 
 typedef LinkFactory = Future<Link?> Function(String id); // 只连这一张；不在旁边返回 null
 typedef CardScanner = Future<List<CardChoice>> Function(); // 附近所有的卡，信号强的在前
@@ -301,10 +302,12 @@ class Syncer {
       _changed();
       try {
         final a = chat != null ? Analyzer(store.lib, chat!) : Analyzer.of(store.lib, llm);
+        final before = res['scenes'] as List? ?? const [];
         res['scenes'] = await a.run(r.stem, res, progress: (d, t) {
           r.progress = t == 0 ? 0 : d * 100 ~/ t;
           onChange?.call();
         });
+        carryDone(before, res['scenes']);
         await store.putResult(r.stem, res);
         r
           ..stage = 'done'

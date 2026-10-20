@@ -150,21 +150,21 @@ double _clamp(DateTime t0, Object? clock, double lo, double hi) {
   return v < lo ? lo : (v > hi ? hi : v);
 }
 
-/// 模型常把同一件事同时放进「行动」和「提醒」：跟某条提醒说的是一回事（字面重合一半以上）的行动去掉。
-List<Map<String, dynamic>> dedupeActions(List<Map<String, dynamic>> actions, List<Map<String, dynamic>> reminders) {
+/// 两条待办说的是不是一回事：去掉标点空白后，两字一组的片段重合一半以上。
+bool sameTodo(String a, String b) {
   Set<String> grams(String t) {
     final c = t.replaceAll(RegExp(r'[\s，。、,.（）()]'), '');
     return {for (var i = 0; i + 1 < c.length; i++) c.substring(i, i + 2)};
   }
 
-  bool same(String a, String b) {
-    final x = grams(a), y = grams(b);
-    if (x.isEmpty || y.isEmpty) return a == b;
-    return x.intersection(y).length / (x.length < y.length ? x.length : y.length) >= 0.5;
-  }
-
-  return [for (final a in actions) if (!reminders.any((r) => same(a['text'], r['text']))) a];
+  final x = grams(a), y = grams(b);
+  if (x.isEmpty || y.isEmpty) return a == b;
+  return x.intersection(y).length / (x.length < y.length ? x.length : y.length) >= 0.5;
 }
+
+/// 模型常把同一件事同时放进「行动」和「提醒」：跟某条提醒说的是一回事的行动去掉。
+List<Map<String, dynamic>> dedupeActions(List<Map<String, dynamic>> actions, List<Map<String, dynamic>> reminders) =>
+    [for (final a in actions) if (!reminders.any((r) => sameTodo(a['text'], r['text']))) a];
 
 String _pad(int n) => n.toString().padLeft(2, '0');
 String _iso(DateTime t) => '${t.year}-${_pad(t.month)}-${_pad(t.day)}T${_pad(t.hour)}:${_pad(t.minute)}:${_pad(t.second)}';

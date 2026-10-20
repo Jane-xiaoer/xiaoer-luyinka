@@ -11,6 +11,7 @@ import 'ask.dart';
 import 'cards.dart';
 import 'drafts.dart';
 import 'handoff.dart';
+import 'ideas.dart';
 import 'llm.dart';
 import 'md_view.dart';
 import 'people.dart';
@@ -20,6 +21,8 @@ import 'store.dart';
 import 'sync.dart';
 import 'templates.dart';
 import 'theme.dart';
+import 'todos.dart';
+import 'weekly.dart';
 
 class Home extends StatefulWidget {
   final Store store;
@@ -32,11 +35,15 @@ class Home extends StatefulWidget {
 class _HomeState extends State<Home> {
   String? _day;
   String? _sceneId;
-  int _mode = 0; // 0 按天看 · 1 按类别看 · 2 按人看
+  int _mode = 0; // 0 按天看 · 1 按类别看 · 2 按人看 · 3 待办 · 4 每周回顾
   bool get _byCat => _mode == 1;
   bool get _byPerson => _mode == 2;
+  bool get _todos => _mode == 3;
+  bool get _weeks => _mode == 4;
   String? _cat;
   String? _person;
+  String? _week; // 每周回顾：选中的那周（2026-W42）
+  bool _ideas = false; // 按类别 → 个人感悟：右栏在看「观点 · 按主题」
   final player = Player();
   final _search = TextEditingController();
   final _askKey = GlobalKey<AskBoxState>(); // 搜索 / 按天 / 按类别来回切，对话不丢
@@ -135,7 +142,20 @@ class _HomeState extends State<Home> {
     return l.isEmpty ? null : l.first.name;
   }
 
-  List<Scene> get scenes => _byPerson
+  List<Week> get weeks => weeksOf(store.days.keys);
+
+  Week? get week {
+    final l = weeks;
+    return l.where((w) => w.key == _week).firstOrNull ?? l.firstOrNull;
+  }
+
+  int get openTodos => todosOf(store.scenes).where((t) => !t.done).length;
+
+  List<Scene> get scenes => _todos
+      ? store.scenes.where((s) => s.todo > 0).toList()
+      : _weeks
+      ? (week == null ? [] : scenesIn(week!, store.scenes))
+      : _byPerson
       ? (person == null ? [] : scenesWith(store.scenes, person!))
       : _byCat
           ? (cat == null || cat == draftsKey ? [] : store.byCategory[cat]!)
@@ -151,9 +171,22 @@ class _HomeState extends State<Home> {
     return l.where((d) => d.path == _draft).firstOrNull ?? l.firstOrNull;
   }
 
-  String get topic => _byPerson ? 'person:$person' : (_byCat ? 'cat:$cat' : 'day:$day');
+  String get topic => _todos
+      ? 'todo'
+      : _weeks
+          ? 'week:${week?.key}'
+          : _byPerson
+              ? 'person:$person'
+              : (_byCat ? 'cat:$cat' : 'day:$day');
+
+  /// 按类别 → 个人感悟时，右栏在看「观点 · 按主题」。
+  bool get showIdeas => _ideas && _byCat && cat == '个人感悟' && !searching;
 
   Scene? get scene {
+    // 待办 / 每周回顾：没点哪段时右栏不默认打开第一段（待办给提示，每周回顾给这周的回顾）
+    if (!searching && (_todos || _weeks)) {
+      return _sceneId == null ? null : (_todos ? store.scenes : scenes).where((s) => s.id == _sceneId).firstOrNull;
+    }
     final l = searching ? [for (final h in hits) h.scene] : scenes;
     if (l.isEmpty) return null;
     return l.firstWhere((s) => s.id == _sceneId, orElse: () => l.firstWhere((s) => s.todo > 0, orElse: () => l.first));
@@ -162,6 +195,7 @@ class _HomeState extends State<Home> {
   void _handoff() => showHandoff(context, store, day, scenes);
 
   void pickDay(String d) => setState(() {
+        _mode = 0; // 待办那一屏左栏还是日子，点了回到按天看
         _day = d;
         _sceneId = null;
         _draft = null;
@@ -173,8 +207,56 @@ class _HomeState extends State<Home> {
       _cat = c;
       _sceneId = null;
       _draft = null;
+      _ideas = false;
     });
   }
+
+  void pickWeek(String key) => setState(() {
+        _week = key;
+        _sceneId = null;
+        _draft = null;
+      });
+
+  /// 每周回顾：右栏回到这周的回顾。
+  void _pickReview() => setState(() => _sceneId = null);
+
+  Future<String> _chat(String system, String user) => Llm.instance!.chat(system, user, temperature: 0.3);
+
+  void _genWeek(Week w) {
+    if (!store.hasLib || Llm.instance == null) return;
+    setState(() => _sceneId = null);
+    Jobs.instance.run('week:${w.key}', () => generateWeekly(store.lib, w, scenesIn(w, store.scenes), _chat));
+  }
+
+  void _genIdeas() {
+    if (!store.hasLib || Llm.instance == null) return;
+    Jobs.instance.run('ideas', () => generateIdeasTopics(store.lib, _chat));
+  }
+
+  /// 「按主题整理观点库」：还没整理过就开始整理；右栏（手机上新开一页）看结果。
+  void _openIdeas() {
+    if (!store.hasLib) return;
+    if (!store.lib.ideasTopicFile.existsSync()) _genIdeas();
+    if (MediaQuery.sizeOf(context).width < 900) {
+      Navigator.of(context).push(MaterialPageRoute(
+          builder: (_) => Scaffold(
+                appBar: AppBar(backgroundColor: K.paper, title: const Text('观点 · 按主题')),
+                body: IdeasView(store: store, onGenerate: _genIdeas),
+              )));
+      return;
+    }
+    setState(() {
+      _ideas = true;
+      _sceneId = null;
+      _draft = null;
+    });
+  }
+
+  void _openNarrowReview(Week w) => Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => Scaffold(
+            appBar: AppBar(backgroundColor: K.paper, title: Text('第 ${w.number} 周回顾')),
+            body: WeekReview(store: store, week: w, onGenerate: _genWeek),
+          )));
 
   void pickPerson(String p) => setState(() {
         _person = p;
@@ -186,11 +268,13 @@ class _HomeState extends State<Home> {
         _mode = mode;
         _sceneId = null;
         _draft = null;
+        _ideas = false;
       });
 
   void _pickScene(Scene s) => setState(() {
         _sceneId = s.id;
         _draft = null;
+        _ideas = false;
       });
 
   void _pickDraft(Draft d) => setState(() => _draft = d.path);
@@ -236,9 +320,10 @@ class _HomeState extends State<Home> {
         SizedBox(
             width: 228,
             child: Sidebar(
-                store: store, syncer: widget.syncer, day: day, onPick: pickDay,
+                store: store, syncer: widget.syncer, day: _todos ? null : day, onPick: pickDay,
                 mode: _mode, cat: cat, onPickCat: pickCat, onMode: setMode,
                 people: people, person: person, onPickPerson: pickPerson,
+                todoCount: openTodos, weeks: weeks, week: week?.key, onPickWeek: pickWeek,
                 search: SearchField(controller: _search, onChanged: _onSearch, onClear: clearSearch))),
         Expanded(child: Container(
           margin: const EdgeInsets.fromLTRB(0, 12, 12, 12),
@@ -258,12 +343,20 @@ class _HomeState extends State<Home> {
                   askKey: _askKey, onOpen: openFound, onPick: _pickScene)
               : inDrafts
                   ? DraftColumn(drafts: store.drafts, selected: draft?.path, onPick: _pickDraft, top: 34)
+                  : _todos
+                  ? TodoColumn(store: store, scenes: scenes, selected: scene?.id,
+                      askKey: _askKey, onOpen: openFound, onPick: _pickScene, top: 34)
+                  : _weeks
+                  ? WeekColumn(store: store, week: week, scenes: scenes, selected: scene?.id,
+                      askKey: _askKey, onOpen: openFound, onPick: _pickScene, onReview: _pickReview,
+                      onGenerate: _genWeek, top: 34)
                   : _byPerson
                   ? PersonColumn(store: store, person: person, scenes: scenes, selected: scene?.id,
                       askKey: _askKey, onOpen: openFound, onPick: _pickScene, onPrep: _prep, top: 34)
                   : _byCat
-                      ? CatColumn(store: store, cat: cat, scenes: scenes, selected: scene?.id,
-                          askKey: _askKey, onOpen: openFound, onPick: _pickScene, top: 34)
+                      ? CatColumn(store: store, cat: cat, scenes: scenes, selected: showIdeas ? null : scene?.id,
+                          askKey: _askKey, onOpen: openFound, onPick: _pickScene, top: 34,
+                          onIdeas: cat == '个人感悟' ? _openIdeas : null)
                       : DayColumn(
                           store: store, day: day, scenes: scenes, selected: scene?.id, onHandoff: _handoff,
                           askKey: _askKey, onOpen: openFound, onPick: _pickScene),
@@ -274,8 +367,14 @@ class _HomeState extends State<Home> {
                 ? DraftDetail(draft: draft!, top: 36)
                 : inDrafts
                     ? const Hint('wave', '还没有成稿', '在对话里让小耳写好东西，点回答下面的「存成稿」，就存到这里。')
+                    : showIdeas
+                    ? IdeasView(store: store, onGenerate: _genIdeas, top: 36)
+                    : _weeks && !searching && scene == null && week != null
+                    ? WeekReview(store: store, week: week!, onGenerate: _genWeek, top: 36)
                     : scene == null
-                        ? const Hint('sleep', '还没有内容', '有录音以后，点左边任意一段，这里看要点和逐字稿。')
+                        ? (_todos && !searching
+                            ? const Hint('wave', '点一条待办', '点待办下面的来源，这里打开它来自的那一段。')
+                            : const Hint('sleep', '还没有内容', '有录音以后，点左边任意一段，这里看要点和逐字稿。'))
                         : SceneDetail(scene: scene!, player: player, store: store, top: 36, onQuick: _quick)),
           ]),
         )),
@@ -294,7 +393,21 @@ class _HomeState extends State<Home> {
                 padding: const EdgeInsets.only(right: 10, top: 6, bottom: 6),
                 child: ModeSwitch(mode: _mode, onMode: setMode, compact: true),
               ),
-              if (_byPerson)
+              Padding(
+                padding: const EdgeInsets.only(right: 8, top: 6, bottom: 6),
+                child: ChoiceChip(label: Text('待办 $openTodos'), selected: _todos, onSelected: (_) => setMode(3)),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(right: 10, top: 6, bottom: 6),
+                child: ChoiceChip(label: const Text('每周回顾'), selected: _weeks, onSelected: (_) => setMode(4)),
+              ),
+              if (_weeks)
+                for (final w in weeks)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8, top: 6, bottom: 6),
+                    child: ChoiceChip(label: Text(w.label), selected: w.key == week?.key, onSelected: (_) => pickWeek(w.key)),
+                  )
+              else if (_byPerson)
                 for (final p in people)
                   Padding(
                     padding: const EdgeInsets.only(right: 8, top: 6, bottom: 6),
@@ -306,7 +419,7 @@ class _HomeState extends State<Home> {
                     padding: const EdgeInsets.only(right: 8, top: 6, bottom: 6),
                     child: ChoiceChip(label: Text('${catFolder(e.key)} ${e.value.length}'), selected: e.key == cat, onSelected: (_) => pickCat(e.key)),
                   ),
-              if (_byPerson)
+              if (_byPerson || _todos || _weeks)
                 const SizedBox()
               else if (_byCat)
                 Padding(
@@ -329,12 +442,22 @@ class _HomeState extends State<Home> {
                   askKey: _askKey, onOpen: openFound, onPick: _openNarrow)
               : inDrafts
                   ? DraftColumn(drafts: store.drafts, selected: null, onPick: _openNarrowDraft)
+                  : _todos
+                  ? TodoColumn(store: store, scenes: scenes, selected: null,
+                      askKey: _askKey, onOpen: openFound, onPick: _openNarrow)
+                  : _weeks
+                  ? WeekColumn(store: store, week: week, scenes: scenes, selected: null,
+                      askKey: _askKey, onOpen: openFound, onPick: _openNarrow, onReview: () => _openNarrowReview(week!),
+                      onGenerate: (w) {
+                        _genWeek(w);
+                        _openNarrowReview(w);
+                      })
                   : _byPerson
                   ? PersonColumn(store: store, person: person, scenes: scenes, selected: null,
                       askKey: _askKey, onOpen: openFound, onPick: _openNarrow, onPrep: _prep)
                   : _byCat
                   ? CatColumn(store: store, cat: cat, scenes: scenes, selected: null,
-                      askKey: _askKey, onOpen: openFound, onPick: _openNarrow)
+                      askKey: _askKey, onOpen: openFound, onPick: _openNarrow, onIdeas: cat == '个人感悟' ? _openIdeas : null)
                   : DayColumn(store: store, day: day, scenes: scenes, selected: null,
                       askKey: _askKey, onOpen: openFound, onPick: _openNarrow),
         ),
@@ -451,10 +574,15 @@ class Sidebar extends StatelessWidget {
   final void Function(int) onMode;
   final List<Person> people;
   final Widget? search;
+  final int todoCount; // 还没打勾的待办
+  final List<Week> weeks;
+  final String? week;
+  final void Function(String)? onPickWeek;
   const Sidebar(
       {super.key, required this.store, required this.syncer, required this.day, required this.onPick,
       required this.mode, required this.cat, required this.onPickCat, required this.onMode,
-      required this.people, required this.person, required this.onPickPerson, this.search});
+      required this.people, required this.person, required this.onPickPerson, this.search,
+      this.todoCount = 0, this.weeks = const [], this.week, this.onPickWeek});
 
   @override
   Widget build(BuildContext context) => Container(
@@ -473,11 +601,19 @@ class Sidebar extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
             child: ModeSwitch(mode: mode, onMode: onMode),
           ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
+            child: Column(children: [
+              NavRow(icon: Icons.checklist_rounded, text: '待办', count: todoCount, selected: mode == 3, onTap: () => onMode(3)),
+              NavRow(icon: Icons.event_note_outlined, text: '每周回顾', selected: mode == 4, onTap: () => onMode(4)),
+            ]),
+          ),
           if (search != null) Padding(padding: const EdgeInsets.fromLTRB(12, 0, 12, 10), child: search),
           Expanded(
               child: switch (mode) {
             1 => CatNav(store: store, cat: cat, onPick: onPickCat),
             2 => PeopleNav(people: people, person: person, onPick: onPickPerson),
+            4 => WeekNav(store: store, weeks: weeks, week: week, onPick: (k) => onPickWeek?.call(k)),
             _ => DayNav(store: store, day: day, onPick: onPick),
           }),
           CardPanel(syncer: syncer, store: store),
@@ -826,9 +962,10 @@ class CatColumn extends StatelessWidget {
   final double top;
   final Key? askKey;
   final void Function(Scene)? onOpen;
+  final VoidCallback? onIdeas; // 个人感悟：「按主题整理观点库」
   const CatColumn(
       {super.key, required this.store, required this.cat, required this.scenes, required this.selected, required this.onPick,
-      this.top = 20, this.askKey, this.onOpen});
+      this.top = 20, this.askKey, this.onOpen, this.onIdeas});
 
   @override
   Widget build(BuildContext context) {
@@ -856,6 +993,17 @@ class CatColumn extends StatelessWidget {
           if (hint.isNotEmpty) ...[
             const SizedBox(height: 8),
             Text(hint, style: const TextStyle(fontSize: 12, color: K.faint)),
+          ],
+          if (onIdeas != null) ...[
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                  foregroundColor: K.accent, side: const BorderSide(color: K.accentEdge), visualDensity: VisualDensity.compact,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(99))),
+              onPressed: onIdeas,
+              icon: const Icon(Icons.auto_awesome_outlined, size: 16),
+              label: const Text('按主题整理观点库'),
+            ),
           ],
         ]),
       ),
@@ -1924,19 +2072,23 @@ class Player extends ChangeNotifier {
   Duration pos = Duration.zero, total = Duration.zero;
   bool playing = false;
 
+  final _subs = <StreamSubscription>[];
+
   Player() {
-    _p.onPositionChanged.listen((d) {
-      pos = d;
-      notifyListeners();
-    });
-    _p.onDurationChanged.listen((d) {
-      total = d;
-      notifyListeners();
-    });
-    _p.onPlayerStateChanged.listen((s) {
-      playing = s == PlayerState.playing;
-      notifyListeners();
-    });
+    _subs.addAll([
+      _p.onPositionChanged.listen((d) {
+        pos = d;
+        notifyListeners();
+      }),
+      _p.onDurationChanged.listen((d) {
+        total = d;
+        notifyListeners();
+      }),
+      _p.onPlayerStateChanged.listen((s) {
+        playing = s == PlayerState.playing;
+        notifyListeners();
+      }),
+    ]);
   }
 
   Future<void> play(Store store, String stem, double offset, String label) async {
@@ -1957,6 +2109,10 @@ class Player extends ChangeNotifier {
 
   @override
   void dispose() {
+    // 先断开：播放器关掉时还会再发一两个事件，到这里已经没人听了
+    for (final s in _subs) {
+      s.cancel();
+    }
     _p.dispose();
     super.dispose();
   }
@@ -2177,4 +2333,593 @@ class DraftDetail extends StatelessWidget {
           child: MdView(draft.md),
         ),
       ]);
+}
+
+// ───────── 后台活：每周回顾 / 观点按主题（换了栏也不中断，两边的按钮都看得到进度）─────────
+
+class Jobs extends ChangeNotifier {
+  static final instance = Jobs();
+  final busy = <String>{};
+  final errors = <String, String>{};
+
+  Future<void> run(String key, Future<void> Function() f) async {
+    if (busy.contains(key)) return;
+    busy.add(key);
+    errors.remove(key);
+    notifyListeners();
+    try {
+      await f();
+    } catch (e) {
+      errors[key] = e is StateError ? e.message : '$e';
+    }
+    busy.remove(key);
+    notifyListeners();
+  }
+}
+
+/// 左栏的一行：图标 + 名字 + 数字（待办、每周回顾）。
+class NavRow extends StatelessWidget {
+  final IconData icon;
+  final String text;
+  final int? count;
+  final bool selected;
+  final VoidCallback onTap;
+  const NavRow({super.key, required this.icon, required this.text, this.count, required this.selected, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.only(bottom: 2),
+        child: Material(
+          color: selected ? K.card : Colors.transparent,
+          borderRadius: BorderRadius.circular(10),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(10),
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+              child: Row(children: [
+                Icon(icon, size: 16, color: selected ? K.accent : K.mute),
+                const SizedBox(width: 8),
+                Expanded(
+                    child: Text(text,
+                        style: TextStyle(fontWeight: selected ? FontWeight.w600 : FontWeight.w500, color: selected ? K.ink : K.mute))),
+                if (count != null && count! > 0)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1),
+                    decoration: BoxDecoration(color: K.todoSoft, borderRadius: BorderRadius.circular(99)),
+                    child: Text('$count', style: const TextStyle(fontSize: 12, color: K.todo, fontWeight: FontWeight.w700)),
+                  ),
+              ]),
+            ),
+          ),
+        ),
+      );
+}
+
+/// 左栏（每周回顾）：有录音的每一周，新的在前；生成过回顾的打个勾。
+class WeekNav extends StatelessWidget {
+  final Store store;
+  final List<Week> weeks;
+  final String? week;
+  final void Function(String) onPick;
+  const WeekNav({super.key, required this.store, required this.weeks, required this.week, required this.onPick});
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+        listenable: Jobs.instance,
+        builder: (_, _) => ListView(padding: const EdgeInsets.symmetric(horizontal: 10), children: [
+          for (final w in weeks)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 2),
+              child: Material(
+                color: w.key == week ? K.card : Colors.transparent,
+                borderRadius: BorderRadius.circular(10),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(10),
+                  onTap: () => onPick(w.key),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    child: Row(children: [
+                      Expanded(
+                          child: Text(w.label,
+                              style: TextStyle(fontWeight: w.key == week ? FontWeight.w600 : FontWeight.w400,
+                                  color: w.key == week ? K.ink : K.mute))),
+                      if (store.hasLib && weekFile(store.lib, w) != null)
+                        const Padding(padding: EdgeInsets.only(right: 6), child: Icon(Icons.check, size: 14, color: K.accent)),
+                      Text('W${w.number}', style: TextStyle(fontSize: 12, color: w.key == week ? K.accent : K.faint, fontWeight: FontWeight.w600)),
+                    ]),
+                  ),
+                ),
+              ),
+            ),
+        ]),
+      );
+}
+
+// ───────── 待办 ─────────
+
+/// 中栏（待办）：所有段的待办，分「有时间的」「没时间的」，打了勾的收进底下的「已完成」。
+class TodoColumn extends StatefulWidget {
+  final Store store;
+  final List<Scene> scenes; // 还有没办完待办的段，问小耳时当资料
+  final String? selected;
+  final void Function(Scene) onPick;
+  final double top;
+  final Key? askKey;
+  final void Function(Scene)? onOpen;
+  const TodoColumn(
+      {super.key, required this.store, required this.scenes, required this.selected, required this.onPick, this.top = 20,
+      this.askKey, this.onOpen});
+  @override
+  State<TodoColumn> createState() => _TodoColumnState();
+}
+
+class _TodoColumnState extends State<TodoColumn> {
+  bool _showDone = false;
+
+  Widget _head(String t, int n) => Padding(
+        padding: const EdgeInsets.fromLTRB(8, 10, 8, 6),
+        child: Row(children: [
+          Text(t, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: K.mute)),
+          const SizedBox(width: 8),
+          Text('$n', style: const TextStyle(fontSize: 12, color: K.faint)),
+          const SizedBox(width: 8),
+          const Expanded(child: Divider(color: K.line)),
+        ]),
+      );
+
+  Widget _tile(Todo t) => TodoTile(
+      key: ValueKey('${t.scene.stem}/${t.scene.id}/${t.kind}/${t.index}'),
+      todo: t, store: widget.store, selected: t.scene.id == widget.selected, onOpen: () => widget.onPick(t.scene));
+
+  @override
+  Widget build(BuildContext context) {
+    final all = todosOf(widget.store.scenes);
+    final open = all.where((t) => !t.done).toList();
+    final timed = open.where((t) => t.timed).toList(), untimed = open.where((t) => !t.timed).toList();
+    final done = all.where((t) => t.done).toList();
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Padding(
+        padding: EdgeInsets.fromLTRB(24, widget.top, 20, 12),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('待办', style: K.title(26).copyWith(color: K.ink)),
+          const SizedBox(height: 2),
+          const Squiggle(width: 132),
+          const SizedBox(height: 10),
+          Wrap(spacing: 6, runSpacing: 6, children: [
+            _Stat(Icons.check_circle_outline, '${open.length} 件没办完', todo: open.isNotEmpty),
+            if (timed.isNotEmpty) _Stat(Icons.alarm, '${timed.length} 件有时间'),
+            if (done.isNotEmpty) _Stat(Icons.done_all, '已完成 ${done.length}'),
+          ]),
+          const SizedBox(height: 8),
+          const Text('所有录音里整理出的要办的事。打的勾记在那一段里，每日时间线里也跟着打勾。', style: TextStyle(fontSize: 12, color: K.faint)),
+        ]),
+      ),
+      Expanded(
+        child: AskBox(
+          key: widget.askKey, store: widget.store, scenes: widget.scenes, all: widget.store.scenes, onOpen: widget.onOpen,
+          topic: 'todo', focus: _focus(widget.scenes, widget.selected),
+          hint: '问问小耳：这些待办里先做哪件？',
+          child: ListView(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6), children: [
+            if (all.isEmpty)
+              const Padding(
+                padding: EdgeInsets.all(24),
+                child: Text('整理出来的待办都会汇到这。现在还没有。', style: TextStyle(color: K.mute, fontSize: 14)),
+              ),
+            if (timed.isNotEmpty) ...[_head('有时间的', timed.length), for (final t in timed) _tile(t)],
+            if (untimed.isNotEmpty) ...[_head('没时间的', untimed.length), for (final t in untimed) _tile(t)],
+            if (done.isNotEmpty) ...[
+              InkWell(
+                borderRadius: BorderRadius.circular(8),
+                onTap: () => setState(() => _showDone = !_showDone),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(8, 12, 8, 6),
+                  child: Row(children: [
+                    Icon(_showDone ? Icons.expand_less : Icons.expand_more, size: 18, color: K.mute),
+                    const SizedBox(width: 4),
+                    Text('已完成（${done.length}）', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: K.mute)),
+                    const SizedBox(width: 8),
+                    const Expanded(child: Divider(color: K.line)),
+                  ]),
+                ),
+              ),
+              if (_showDone) for (final t in done) _tile(t),
+            ],
+          ]),
+        ),
+      ),
+    ]);
+  }
+}
+
+/// 一条待办：勾 + 原文 + 什么时候 / 谁去做 + 来源（点了打开那段）；Mac 上能放进「提醒事项」。
+class TodoTile extends StatefulWidget {
+  final Todo todo;
+  final Store store;
+  final bool selected;
+  final VoidCallback onOpen;
+  const TodoTile({super.key, required this.todo, required this.store, required this.selected, required this.onOpen});
+  @override
+  State<TodoTile> createState() => _TodoTileState();
+}
+
+class _TodoTileState extends State<TodoTile> {
+  bool _saving = false, _adding = false;
+
+  void _snack(String t) {
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(t), duration: const Duration(seconds: 4)));
+  }
+
+  Future<void> _toggle(bool v) async {
+    setState(() => _saving = true);
+    try {
+      await widget.store.setTodoDone(widget.todo, v);
+    } catch (e) {
+      _snack('没记上：$e');
+    }
+    if (mounted) setState(() => _saving = false);
+  }
+
+  Future<void> _remind() async {
+    final t = widget.todo;
+    setState(() => _adding = true);
+    final err = await addToReminders(t);
+    if (!mounted) return;
+    setState(() => _adding = false);
+    final due = parseWhen(t.when, t.scene.start);
+    _snack(err ??
+        (due == null
+            ? '放进「提醒事项」了${t.when.isEmpty ? '' : '（「${t.when}」认不出具体哪天，没设提醒时间）'}'
+            : '放进「提醒事项」了，${due.month}/${due.day} ${hm(due)} 提醒'));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = widget.todo;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(4, 6, 6, 8),
+        decoration: BoxDecoration(
+            color: widget.selected ? K.cardDeep : Colors.transparent, borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: widget.selected ? K.accentEdge : Colors.transparent)),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          SizedBox(
+            width: 36,
+            child: _saving
+                ? const Padding(
+                    padding: EdgeInsets.all(11), child: SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)))
+                : Checkbox(
+                    value: t.done, activeColor: K.todo, side: const BorderSide(color: K.todo, width: 1.5),
+                    onChanged: (v) => _toggle(v == true)),
+          ),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(t.text,
+                    style: TextStyle(fontSize: 14.5, height: 1.5, color: t.done ? K.faint : K.ink,
+                        decoration: t.done ? TextDecoration.lineThrough : null)),
+                if (t.when.isNotEmpty || t.who.isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Wrap(spacing: 10, runSpacing: 2, crossAxisAlignment: WrapCrossAlignment.center, children: [
+                    if (t.when.isNotEmpty)
+                      Row(mainAxisSize: MainAxisSize.min, children: [
+                        const Icon(Icons.alarm, size: 13, color: K.todo),
+                        const SizedBox(width: 3),
+                        Text(t.when, style: const TextStyle(fontSize: 12.5, color: K.todo)),
+                      ]),
+                    if (t.who.isNotEmpty) Text('谁去做：${t.who}', style: const TextStyle(fontSize: 12.5, color: K.mute)),
+                  ]),
+                ],
+                const SizedBox(height: 2),
+                InkWell(
+                  onTap: widget.onOpen,
+                  child: Text('${t.source} ›', style: const TextStyle(fontSize: 12.5, color: K.accent)),
+                ),
+              ]),
+            ),
+          ),
+          if (Platform.isMacOS && !t.done)
+            IconButton(
+              tooltip: '放进「提醒事项」',
+              visualDensity: VisualDensity.compact,
+              onPressed: _adding ? null : _remind,
+              icon: _adding
+                  ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.add_alert_outlined, size: 18, color: K.mute),
+            ),
+        ]),
+      ),
+    );
+  }
+}
+
+// ───────── 每周回顾 ─────────
+
+/// 中栏（每周回顾）：这周的数字、「这周回顾」一行（这周过完还没生成就是一条提示），下面是这周每天的段。
+class WeekColumn extends StatelessWidget {
+  final Store store;
+  final Week? week;
+  final List<Scene> scenes; // 按时间先后
+  final String? selected;
+  final void Function(Scene) onPick;
+  final VoidCallback onReview;
+  final void Function(Week) onGenerate;
+  final double top;
+  final Key? askKey;
+  final void Function(Scene)? onOpen;
+  const WeekColumn(
+      {super.key, required this.store, required this.week, required this.scenes, required this.selected, required this.onPick,
+      required this.onReview, required this.onGenerate, this.top = 20, this.askKey, this.onOpen});
+
+  @override
+  Widget build(BuildContext context) {
+    if (week == null) return const Hint('wave', '还没有录音', '有录音以后，这里按周回顾：推进了什么、答应了谁什么、下周要盯的。');
+    final w = week!;
+    final st = WeekStats.of(scenes);
+    final days = <String, List<Scene>>{};
+    for (final s in scenes) {
+      days.putIfAbsent(s.dayKey, () => []).add(s);
+    }
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Padding(
+        padding: EdgeInsets.fromLTRB(24, top, 20, 12),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('${w.label} 这一周', style: K.title(26).copyWith(color: K.ink)),
+          const SizedBox(height: 2),
+          const Squiggle(width: 132),
+          const SizedBox(height: 10),
+          Wrap(spacing: 6, runSpacing: 6, children: [
+            _Stat(Icons.mic_none, '录了 ${duration(st.total)}'),
+            _Stat(Icons.view_agenda_outlined, '${st.scenes} 段'),
+            if (st.meetings > 0) _Stat(Icons.groups_outlined, '开会 ${st.meetings} 次'),
+            if (st.deals > 0) _Stat(Icons.handshake_outlined, '洽谈 ${st.deals} 次'),
+          ]),
+        ]),
+      ),
+      Expanded(
+        child: AskBox(
+          key: askKey, store: store, scenes: scenes, all: store.scenes, onOpen: onOpen,
+          topic: 'week:${w.key}', focus: _focus(scenes, selected),
+          hint: '问问小耳：这周我答应了谁什么？',
+          child: ListView(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6), children: [
+            ListenableBuilder(
+              listenable: Jobs.instance,
+              builder: (_, _) {
+                final busy = Jobs.instance.busy.contains('week:${w.key}');
+                final has = store.hasLib && weekFile(store.lib, w) != null;
+                final nudge = !busy && !has && w.isOver(DateTime.now());
+                return Material(
+                  color: nudge ? K.todoBg : (selected == null ? K.cardDeep : Colors.transparent),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      side: BorderSide(color: nudge ? K.todoSoft : (selected == null ? K.accentEdge : K.line))),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(14),
+                    onTap: nudge ? () => onGenerate(w) : onReview,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
+                      child: Row(children: [
+                        Icon(nudge ? Icons.auto_awesome_outlined : Icons.event_note_outlined, size: 18, color: nudge ? K.todo : K.accent),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            busy
+                                ? '小耳正在写这周回顾…'
+                                : nudge
+                                    ? '这周还没回顾，点这里生成'
+                                    : has
+                                        ? '这周回顾'
+                                        : '这周回顾（这周还没过完，也可以先生成）',
+                            style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600, color: nudge ? K.todo : K.ink),
+                          ),
+                        ),
+                        if (busy)
+                          const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: K.accent))
+                        else
+                          Icon(Icons.chevron_right, size: 18, color: nudge ? K.todo : K.accent),
+                      ]),
+                    ),
+                  ),
+                );
+              },
+            ),
+            for (final g in days.entries) ...[
+              Padding(
+                padding: const EdgeInsets.fromLTRB(8, 14, 8, 6),
+                child: Row(children: [
+                  Text(dayTitle(g.key, short: true), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: K.mute)),
+                  const SizedBox(width: 8),
+                  const Expanded(child: Divider(color: K.line)),
+                ]),
+              ),
+              for (final s in g.value) SceneRow(scene: s, selected: s.id == selected, onTap: () => onPick(s)),
+            ],
+          ]),
+        ),
+      ),
+    ]);
+  }
+}
+
+/// 拷贝 / 在 Finder 里显示 / 存成稿 这一排（每周回顾、观点按主题共用）。
+Widget _fileActions(BuildContext context, File f, String md, {VoidCallback? onRedo, String redo = '重新生成', VoidCallback? onDraft}) =>
+    Wrap(spacing: 2, children: [
+      if (onRedo != null)
+        TextButton.icon(
+          style: TextButton.styleFrom(foregroundColor: K.accent, visualDensity: VisualDensity.compact),
+          onPressed: onRedo,
+          icon: const Icon(Icons.refresh, size: 16),
+          label: Text(redo),
+        ),
+      TextButton.icon(
+        style: TextButton.styleFrom(foregroundColor: K.mute, visualDensity: VisualDensity.compact),
+        onPressed: () async {
+          await Clipboard.setData(ClipboardData(text: md.trim()));
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('复制好了'), duration: Duration(seconds: 2)));
+          }
+        },
+        icon: const Icon(Icons.copy_rounded, size: 16),
+        label: const Text('拷贝'),
+      ),
+      TextButton.icon(
+        style: TextButton.styleFrom(foregroundColor: K.mute, visualDensity: VisualDensity.compact),
+        onPressed: () => Platform.isMacOS
+            ? Process.run('open', ['-R', f.path])
+            : ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('存在：${f.path}'))),
+        icon: const Icon(Icons.folder_open_outlined, size: 16),
+        label: Text(Platform.isMacOS ? '在 Finder 里显示' : '存在哪'),
+      ),
+      if (onDraft != null)
+        TextButton.icon(
+          style: TextButton.styleFrom(foregroundColor: K.mute, visualDensity: VisualDensity.compact),
+          onPressed: onDraft,
+          icon: const Icon(Icons.save_alt_rounded, size: 16),
+          label: const Text('存成稿'),
+        ),
+    ]);
+
+Widget _mdCard(String md) => Container(
+      padding: const EdgeInsets.fromLTRB(20, 16, 16, 16),
+      decoration: BoxDecoration(color: K.card, borderRadius: BorderRadius.circular(16), border: Border.all(color: K.accentEdge)),
+      child: MdView(md),
+    );
+
+Widget _busyRow(String t) => Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Row(children: [
+        const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: K.accent)),
+        const SizedBox(width: 8),
+        Flexible(child: Text(t, style: const TextStyle(fontSize: 13.5, color: K.mute))),
+      ]),
+    );
+
+Widget _errorText(String e) => Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: SelectableText('没生成成：$e', style: const TextStyle(fontSize: 13.5, height: 1.6, color: K.todo)),
+    );
+
+String _readOr(File? f) {
+  try {
+    return f == null ? '' : f.readAsStringSync();
+  } catch (_) {
+    return '';
+  }
+}
+
+/// 右栏：这一周的回顾（每周/ 里的文件）。没生成过给「生成这周回顾」，生成过给「重新生成」。
+class WeekReview extends StatelessWidget {
+  final Store store;
+  final Week week;
+  final void Function(Week) onGenerate;
+  final double top;
+  const WeekReview({super.key, required this.store, required this.week, required this.onGenerate, this.top = 24});
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+        listenable: Jobs.instance,
+        builder: (context, _) {
+          final job = 'week:${week.key}';
+          final busy = Jobs.instance.busy.contains(job);
+          final err = Jobs.instance.errors[job];
+          final f = store.hasLib ? weekFile(store.lib, week) : null;
+          final md = _readOr(f);
+          return ListView(key: PageStorageKey(job), padding: EdgeInsets.fromLTRB(32, top, 32, 32), children: [
+            Wrap(spacing: 14, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
+              const Chip2('每周回顾'),
+              Text('${week.key} · ${week.label}', style: const TextStyle(fontSize: 13, color: K.faint)),
+            ]),
+            const SizedBox(height: 10),
+            Text('${week.label} 回顾', style: K.title(26).copyWith(color: K.ink)),
+            const SizedBox(height: 2),
+            const Squiggle(width: 96),
+            const SizedBox(height: 8),
+            if (err != null) _errorText(err),
+            if (busy) _busyRow('小耳正在看这周的录音、写回顾…（一般半分钟到一分钟）'),
+            if (f != null && md.isNotEmpty) ...[
+              _fileActions(context, f, md, onRedo: busy ? null : () => onGenerate(week)),
+              const SizedBox(height: 8),
+              _mdCard(md),
+            ] else if (!busy) ...[
+              Text(week.isOver(DateTime.now()) ? '这周还没回顾。' : '这周还没过完，现在生成只包括到目前为止的录音。',
+                  style: const TextStyle(fontSize: 14, color: K.mute, height: 1.7)),
+              const SizedBox(height: 4),
+              const Text('回顾会写：这周概览、推进了什么、答应了谁什么、新冒出的观点、下周要盯的。存在资料文件夹的「每周」里。',
+                  style: TextStyle(fontSize: 12.5, color: K.faint, height: 1.6)),
+              const SizedBox(height: 12),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: FilledButton.icon(
+                  style: FilledButton.styleFrom(backgroundColor: K.accent),
+                  onPressed: () => onGenerate(week),
+                  icon: const Icon(Icons.auto_awesome_outlined, size: 16),
+                  label: const Text('生成这周回顾'),
+                ),
+              ),
+            ],
+          ]);
+        },
+      );
+}
+
+// ───────── 观点按主题 ─────────
+
+/// 右栏：个人感悟/观点·按主题.md。能重新整理、拷贝、在 Finder 里显示、存成稿。
+class IdeasView extends StatelessWidget {
+  final Store store;
+  final VoidCallback onGenerate;
+  final double top;
+  const IdeasView({super.key, required this.store, required this.onGenerate, this.top = 24});
+
+  void _draft(BuildContext context, String md) {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final body = md.replaceFirst(RegExp(r'^> .*\n+', multiLine: true), ''); // 生成时间那行不进成稿正文
+      final f = saveDraft(store.lib, answer: body, request: '按主题整理观点库');
+      store.refreshDrafts();
+      messenger.showSnackBar(SnackBar(content: Text('存成稿了：$draftsKey/${f.uri.pathSegments.last}')));
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('没存成：$e')));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+        listenable: Jobs.instance,
+        builder: (context, _) {
+          final busy = Jobs.instance.busy.contains('ideas');
+          final err = Jobs.instance.errors['ideas'];
+          final f = store.hasLib ? store.lib.ideasTopicFile : null;
+          final md = f != null && f.existsSync() ? _readOr(f) : '';
+          return ListView(padding: EdgeInsets.fromLTRB(32, top, 32, 32), children: [
+            const Wrap(children: [Chip2('个人感悟')]),
+            const SizedBox(height: 10),
+            Text('观点 · 按主题', style: K.title(26).copyWith(color: K.ink)),
+            const SizedBox(height: 2),
+            const Squiggle(width: 96),
+            const SizedBox(height: 8),
+            const Text('把「观点库」里按时间记下的观点，按主题归并：核心观点（标出处日期）、例子和金句、可以讲成演讲的提纲。',
+                style: TextStyle(fontSize: 12.5, color: K.faint, height: 1.6)),
+            const SizedBox(height: 8),
+            if (err != null) _errorText(err),
+            if (busy) _busyRow('小耳正在按主题整理观点库…（一般一两分钟）'),
+            if (f != null && md.isNotEmpty) ...[
+              _fileActions(context, f, md, onRedo: busy ? null : onGenerate, redo: '重新整理', onDraft: () => _draft(context, md)),
+              const SizedBox(height: 8),
+              _mdCard(md),
+            ] else if (!busy)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: FilledButton.icon(
+                  style: FilledButton.styleFrom(backgroundColor: K.accent),
+                  onPressed: onGenerate,
+                  icon: const Icon(Icons.auto_awesome_outlined, size: 16),
+                  label: const Text('开始整理'),
+                ),
+              ),
+          ]);
+        },
+      );
 }

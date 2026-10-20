@@ -3,6 +3,8 @@
 //   会议纪要/2026-10-18 14.00 标题.md       按类别分文件夹，一段一个笔记（时间地点人物事件 + 按模板整理 + 逐字稿）
 //   现场调研/按对象/某某公司.md              同一个调研对象的历次记录都追加在这（下次调研同一对象时当背景）
 //   个人感悟/观点库.md                       历次感悟里的观点和演讲素材汇在一起（准备演讲时翻这一份）
+//   个人感悟/观点·按主题.md                   观点库按主题归并后的版本（点「按主题整理观点库」重新生成，整份覆盖）
+//   每周/2026-W42 (2026-10-12–2026-10-18).md  每周回顾（打开那一周时点按钮生成）
 //   逐字稿/<录音>.md                       整条录音的全文
 //   录音/<录音>.m4a                        播放用
 //   模板/<类别>.md                         各类别的整理方式，可以直接改
@@ -39,12 +41,14 @@ class Library {
   Directory get subjectsDir => Directory('$path/现场调研/按对象');
   File subjectFile(String s) => File('${subjectsDir.path}/${safe(s)}.md');
   File get ideasFile => File('$path/个人感悟/观点库.md');
+  File get ideasTopicFile => File('$path/个人感悟/观点·按主题.md');
+  Directory get weeksDir => Directory('$path/每周');
   File get quickActionsFile => File('$path/模板/一键按钮.md');
   File get styleFile => File('$path/模板/我的写作风格.md');
   File get vocabFile => File('$path/模板/常用词.md');
 
   Future<void> ensure() async {
-    for (final d in ['.xiaoer', '录音', '逐字稿', '每日', '模板', '成稿']) {
+    for (final d in ['.xiaoer', '录音', '逐字稿', '每日', '每周', '模板', '成稿']) {
       await Directory('$path/$d').create(recursive: true);
     }
     for (final e in defaultTemplates.entries) {
@@ -64,7 +68,8 @@ class Library {
 - 每日/：每天的时间线
 - 会议纪要/、我的分享/、商务洽谈/、现场调研/、听课讲座/、多人群聊/ …：按类别分好的笔记
 - 现场调研/按对象/：同一个调研对象的历次记录
-- 个人感悟/观点库.md：平时说出来的感悟、判断、演讲素材汇在一起，准备演讲时翻这一份
+- 个人感悟/观点库.md：平时说出来的感悟、判断、演讲素材汇在一起，准备演讲时翻这一份；观点·按主题.md 是按主题归并过的
+- 每周/：每周回顾（推进了什么、答应了谁什么、下周要盯的）
 - 逐字稿/、录音/：全文和原声
 - 模板/：每一类怎么整理。直接改这些 .md，下次整理就按你改过的来
 - 模板/一键按钮.md：每一类下面「拿去用」按钮让小耳写什么；模板/我的写作风格.md：让小耳写文章、朋友圈时照着的口吻
@@ -206,7 +211,7 @@ class Library {
       b.writeln('- **${_hm(s.start)}–${_hm(s.end)}** [${catKey(s.category)}] ${s.title}$link');
       if (s.event.isNotEmpty) b.writeln('  ${s.event}');
       for (final t in [...s.actions, ...s.reminders]) {
-        b.writeln('  - [ ] ${t['text']}${(t['when'] ?? '').toString().isNotEmpty ? '（${t['when']}）' : ''}');
+        b.writeln('  - [${t['done'] == true ? 'x' : ' '}] ${t['text']}${(t['when'] ?? '').toString().isNotEmpty ? '（${t['when']}）' : ''}');
       }
     }
     await File('$path/每日/$day.md').writeAsString(b.toString());

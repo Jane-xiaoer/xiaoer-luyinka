@@ -31,6 +31,8 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>把待办放进「提醒事项」App。</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>用蓝牙连你的录音卡，把录音拉到电脑上。</string>
 	<key>NSHumanReadableCopyright</key>

@@ -52,16 +52,16 @@ class PersonTodo {
   const PersonTodo(this.scene, this.text, {this.who = '', this.when = ''});
 }
 
-/// 还没兑现的待办：这些段的 actions / reminders 里，who 或 text 提到 [name] 的。新的段在前。
+/// 还没兑现的待办：这些段的 actions / reminders 里，没打勾、who 或 text 提到 [name] 的。新的段在前。
 List<PersonTodo> todosWith(List<Scene> scenes, String name) {
   final k = personKey(name);
   bool hit(Object? x) => k.isNotEmpty && personKey('${x ?? ''}').contains(k);
   return [
     for (final s in scenes) ...[
       for (final a in s.actions)
-        if (hit(a['who']) || hit(a['text'])) PersonTodo(s, '${a['text']}', who: '${a['who'] ?? ''}'),
+        if (a['done'] != true && (hit(a['who']) || hit(a['text']))) PersonTodo(s, '${a['text']}', who: '${a['who'] ?? ''}'),
       for (final r in s.reminders)
-        if (hit(r['text']) || hit(r['who'])) PersonTodo(s, '${r['text']}', when: '${r['when'] ?? ''}'),
+        if (r['done'] != true && (hit(r['text']) || hit(r['who']))) PersonTodo(s, '${r['text']}', when: '${r['when'] ?? ''}'),
     ],
   ];
 }

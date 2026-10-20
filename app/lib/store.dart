@@ -11,6 +11,7 @@ import 'package:flutter/foundation.dart';
 import 'drafts.dart';
 import 'library.dart';
 import 'templates.dart';
+import 'todos.dart';
 
 class Scene {
   final Map<String, dynamic> d;
@@ -40,7 +41,7 @@ class Scene {
   String get subject => d['subject'] ?? ''; // 现场调研的对象
   String get body => d['body'] ?? ''; // 按类别模板整理好的笔记（Markdown）；旧版数据没有
   bool get noise => category == noiseCat;
-  int get todo => actions.length + reminders.length;
+  int get todo => [...actions, ...reminders].where((t) => t['done'] != true).length; // 还没打勾的
   String get dayKey => d['start'].toString().substring(0, 10);
 }
 
@@ -169,6 +170,21 @@ class Store extends ChangeNotifier {
     if (res == null) return;
     res['scenes'] = [for (final x in _scenes[s.stem] ?? <Scene>[]) x.id == s.id ? s.d : x.d];
     await putResult(s.stem, res);
+  }
+
+  /// 给一条待办打勾 / 取消：记在那一条里（done: true），写回索引，每日/ 里的 [ ] 跟着变。
+  Future<void> setTodoDone(Todo t, bool done) async {
+    final l = t.scene.d[t.kind];
+    if (l is! List || t.index >= l.length) return;
+    final m = Map<String, dynamic>.from(l[t.index]);
+    if (done) {
+      m['done'] = true;
+    } else {
+      m.remove('done');
+    }
+    // 换成新列表而不是改原列表那一格：原列表可能带着更窄的类型（比如 List<Map<String, String>>），塞不进 bool
+    t.scene.d[t.kind] = [for (final (i, x) in l.indexed) i == t.index ? m : x];
+    await putScene(t.scene);
   }
 
   /// 手动改一段的类别：换成 [cat]、按新类别的模板重新整理（[note] 就是 Analyzer.note），再写回。
