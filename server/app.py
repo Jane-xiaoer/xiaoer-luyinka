@@ -176,7 +176,8 @@ def _transcribe(ogg: Path, md: Path, title: str, prog) -> None:
             if pipeline._transcriber is None:
                 pipeline._transcriber = Transcriber()
             segs = list(pipeline._transcriber.segments(wav, prog))
-    md.write_text(to_markdown(title, segs, {"时长": fmt_ts(pipeline.audio_seconds(ogg))}), encoding="utf-8")
+    md.write_text(to_markdown(title, segs, {"时长": fmt_ts(pipeline.audio_seconds(ogg))}, max_sec=30, max_chars=120),
+                  encoding="utf-8")
 
 
 ASR_LOCK = threading.Lock()   # 常驻的转写模型：后台整理录音和 /v1/transcribe 共用，一次只让一个用

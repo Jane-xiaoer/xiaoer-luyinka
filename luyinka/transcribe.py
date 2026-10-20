@@ -157,8 +157,10 @@ def fmt_ts(sec: float) -> str:
 
 
 def to_markdown(title: str, segs: list[Segment], meta: dict[str, str] | None = None,
-                gap: float = 2.0) -> str:
-    """相邻句子间隔 < gap 秒就并成一段，每段前标开始时间。"""
+                gap: float = 2.0, max_sec: float | None = None, max_chars: int | None = None) -> str:
+    """相邻句子间隔 < gap 秒就并成一段，每段前标开始时间。
+    max_sec / max_chars：一段最长多少秒 / 多少字，到了就另起一段（连续说话时句间很少停够 gap，
+    不设上限的话几分钟并成一行，钟点只剩一个，后面按钟点切场景就切不准）。"""
     lines = [f"# {title}", ""]
     for k, v in (meta or {}).items():
         lines.append(f"- {k}：{v}")
@@ -173,7 +175,9 @@ def to_markdown(title: str, segs: list[Segment], meta: dict[str, str] | None = N
             para.clear()
 
     for s in segs:
-        if para and s.start - para[-1].end > gap:
+        if para and (s.start - para[-1].end > gap
+                     or (max_sec and s.end - para[0].start > max_sec)
+                     or (max_chars and sum(len(x.text) for x in para) + len(s.text) > max_chars)):
             flush()
         para.append(s)
     flush()
