@@ -8,6 +8,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
+import 'analyze.dart';
 import 'drafts.dart';
 import 'library.dart';
 import 'templates.dart';
@@ -150,15 +151,28 @@ class Store extends ChangeNotifier {
   }
 
   /// 存一条录音的结果：索引 + 每段的笔记文件 + 那几天的时间线。
+  /// 重新切分 / 合并后不在了的段：笔记文件删掉，调研对象文件和观点库里它那块拿掉。
   Future<void> putResult(String stem, Map<String, dynamic> res) async {
+    final before = [for (final s in _scenes[stem] ?? const <Scene>[]) (s.id, s.d['file'] as String?, s.category, s.subject, s.dayKey)];
     final scenes = [for (final s in (res['scenes'] as List? ?? const [])) Scene(Map<String, dynamic>.from(s), stem)];
     for (final s in scenes.where((s) => !s.noise)) {
       await lib.writeNote(s);
     }
+    final files = {for (final s in scenes) s.d['file']};
+    for (final (id, file, cat, subject, _) in before) {
+      if (file != null && !files.contains(file) && file.startsWith('${lib.path}/') && await File(file).exists()) {
+        await File(file).delete();
+      }
+      final now = scenes.where((s) => s.id == id).firstOrNull;
+      if (cat == '现场调研' && subject.isNotEmpty && (now?.category != cat || now?.subject != subject)) {
+        await lib.forget(id, subject: subject);
+      }
+      if (cat == '个人感悟' && now?.category != cat) await lib.forget(id, ideas: true);
+    }
     res['scenes'] = [for (final s in scenes) s.d];
     await result(stem).writeAsString(prettyJson(res));
     _scenes[stem] = scenes;
-    for (final day in {for (final s in scenes) s.dayKey}) {
+    for (final day in {for (final s in scenes) s.dayKey, for (final b in before) b.$5}) {
       await lib.writeDay(day, days[day] ?? []);
     }
     notifyListeners();
@@ -212,6 +226,46 @@ class Store extends ChangeNotifier {
     }
     await putScene(s);
   }
+
+  /// 同一条录音里排在 [s] 前面最近的一段（不算杂音）；没有就是 null。
+  Scene? previousOf(Scene s) => _ordered(s.stem).where((x) => !x.noise && x.start.isBefore(s.start)).lastOrNull;
+
+  /// 跟上一段合并（见 [mergeSpan]）。返回合好的那段。
+  Future<Scene> mergeWithPrevious(Scene s, Future<String> Function(Scene) note) {
+    final p = previousOf(s);
+    if (p == null) throw StateError('这段前面没有能合并的段');
+    return mergeSpan(p, s, note);
+  }
+
+  /// 整条录音当一段：从第一段到最后一段（不算头尾的杂音）全合起来。
+  Future<Scene> mergeRecording(String stem, Future<String> Function(Scene) note) {
+    final real = _ordered(stem).where((x) => !x.noise).toList();
+    if (real.length < 2) throw StateError('这条录音只有一段');
+    return mergeSpan(real.first, real.last, note);
+  }
+
+  /// 同一条录音里从 [first] 到 [last] 这几段（中间夹的杂音也算）合成一段，按合并后类别的模板重新整理（[note] 就是 Analyzer.note），
+  /// 再写回：旧笔记文件删掉、写新的，每日 / 观点库 / 调研对象跟着更新。整理失败时原样不动，错误照抛。
+  Future<Scene> mergeSpan(Scene first, Scene last, Future<String> Function(Scene) note) async {
+    final stem = first.stem;
+    final all = _ordered(stem);
+    final i = all.indexWhere((x) => x.id == first.id), j = all.indexWhere((x) => x.id == last.id);
+    if (i < 0 || j <= i) throw StateError('要合并的段不在同一条录音里，或者顺序不对');
+    final span = all.sublist(i, j + 1);
+    final m = Scene(mergeScenes([for (final x in span) x.d]), stem);
+    m.d['body'] = await note(m);
+    final res = readResult(stem);
+    if (res == null) throw StateError('找不到这条录音的索引');
+    final gone = {for (final x in span) x.id};
+    res['scenes'] = [
+      for (final x in all)
+        if (x.id == first.id) m.d else if (!gone.contains(x.id)) x.d,
+    ];
+    await putResult(stem, res);
+    return _scenes[stem]!.firstWhere((x) => x.id == m.id);
+  }
+
+  List<Scene> _ordered(String stem) => [...?_scenes[stem]]..sort((a, b) => a.start.compareTo(b.start));
 
   /// 一条录音的所有段（含杂音），整条拷贝逐字稿用。
   List<Scene> scenesOf(String stem) => [...?_scenes[stem]];

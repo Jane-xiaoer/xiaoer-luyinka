@@ -53,7 +53,9 @@ class Library {
     }
     for (final e in defaultTemplates.entries) {
       final f = templateFile(e.key);
-      if (!await f.exists()) await f.writeAsString('${e.value}\n');
+      if (!await f.exists() || (legacyTemplates[e.key] ?? const []).contains((await f.readAsString()).trim())) {
+        await f.writeAsString('${e.value}\n');
+      }
     }
     if (!await quickActionsFile.exists()) await quickActionsFile.writeAsString(quickActionsMd(quickActions));
     if (!await styleFile.exists()) await styleFile.writeAsString(defaultStyle);

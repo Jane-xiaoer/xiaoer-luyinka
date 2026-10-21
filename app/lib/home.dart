@@ -376,7 +376,8 @@ class _HomeState extends State<Home> {
                         ? (_todos && !searching
                             ? const Hint('wave', '点一条待办', '点待办下面的来源，这里打开它来自的那一段。')
                             : const Hint('sleep', '还没有内容', '有录音以后，点左边任意一段，这里看要点和逐字稿。'))
-                        : SceneDetail(scene: scene!, player: player, store: store, top: 36, onQuick: _quick)),
+                        : SceneDetail(scene: scene!, player: player, store: store, top: 36, onQuick: _quick,
+                            onMerged: _pickScene, onRecut: widget.syncer.reanalyze)),
           ]),
         )),
       ]);
@@ -468,7 +469,9 @@ class _HomeState extends State<Home> {
                 builder: (_) => Scaffold(
                       appBar: AppBar(backgroundColor: K.paper, title: Text(s.title)),
                       body: Column(children: [
-                        Expanded(child: SceneDetail(scene: s, player: player, store: store, onQuick: _quick)),
+                        Expanded(
+                            child: SceneDetail(
+                                scene: s, player: player, store: store, onQuick: _quick, onRecut: widget.syncer.reanalyze)),
                         ListenableBuilder(
                             listenable: player,
                             builder: (_, _) => player.stem == null ? const SizedBox() : PlayerBar(player: player)),
@@ -1680,7 +1683,11 @@ class SceneDetail extends StatefulWidget {
   final Store store;
   final double top; // 宽屏顶上留给拖动条
   final void Function(Scene, String, String)? onQuick; // 「拿去用」按钮：(这段, 按钮名, 要求)
-  const SceneDetail({super.key, required this.scene, required this.player, required this.store, this.top = 24, this.onQuick});
+  final void Function(Scene)? onMerged; // 合并好以后打开合好的那段；不给就退回上一页（手机上）
+  final Future<void> Function(String stem)? onRecut; // 整条录音重新切场景、重新整理
+  const SceneDetail(
+      {super.key, required this.scene, required this.player, required this.store, this.top = 24, this.onQuick,
+      this.onMerged, this.onRecut});
 
   /// 「笔记 | 逐字稿」切换。放在类上而不是 State 里：点别的段时保持上次选的。
   static final transcriptTab = ValueNotifier<bool>(false);
@@ -1820,6 +1827,10 @@ class _SceneDetailState extends State<SceneDetail> {
       const Squiggle(width: 96),
       const SizedBox(height: 8),
       SelectableText(s.event, style: const TextStyle(fontSize: 15, height: 1.7)),
+      if (!s.noise) ...[
+        const SizedBox(height: 8),
+        MergeBar(scene: s, store: store, onMerged: widget.onMerged, onRecut: widget.onRecut),
+      ],
       const SizedBox(height: 12),
       Align(
         alignment: Alignment.centerLeft,
@@ -1995,6 +2006,122 @@ class _CategoryChipState extends State<CategoryChip> {
         const Icon(Icons.arrow_drop_down, size: 18, color: K.faint),
       ]),
     );
+  }
+}
+
+// ───────── 一场会别拆成几段：手动合并 / 重新切分 ─────────
+
+/// 右栏标题下面：跟上一段合并、整条录音当一段、重新切分这条录音。
+class MergeBar extends StatefulWidget {
+  final Scene scene;
+  final Store store;
+  final void Function(Scene)? onMerged;
+  final Future<void> Function(String stem)? onRecut;
+  const MergeBar({super.key, required this.scene, required this.store, this.onMerged, this.onRecut});
+  @override
+  State<MergeBar> createState() => _MergeBarState();
+}
+
+class _MergeBarState extends State<MergeBar> {
+  String? _doing; // 正在干什么（显示在按钮那一行）
+
+  Future<bool> _confirm(String title, String body, String ok) async =>
+      await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: K.card,
+          title: Text(title),
+          content: Text(body, style: const TextStyle(height: 1.6)),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+            FilledButton(
+                style: FilledButton.styleFrom(backgroundColor: K.accent), onPressed: () => Navigator.pop(ctx, true), child: Text(ok)),
+          ],
+        ),
+      ) ==
+      true;
+
+  Future<void> _merge(bool whole) async {
+    final s = widget.scene, store = widget.store;
+    if (_doing != null || !store.hasLib || Llm.instance == null) return;
+    final prev = store.previousOf(s);
+    final parts = whole ? store.scenesOf(s.stem).where((x) => !x.noise).toList() : [?prev, s];
+    if (parts.length < 2) return;
+    parts.sort((a, b) => a.start.compareTo(b.start));
+    final cat = mergedCategory(parts.map((x) => x.category));
+    final list = [for (final x in parts) '· ${hm(x.start)}–${hm(x.end)} [${catFolder(x.category)}] ${x.title}'].join('\n');
+    if (!await _confirm(whole ? '整条录音当一段？' : '跟上一段合并？',
+        '$list\n\n合成一段「${catFolder(cat)}」，按这一类的模板重新整理（一般半分钟）。原来这几段的笔记文件会换成合好的这一份。', '合并')) {
+      return;
+    }
+    if (!mounted) return;
+    final messenger = ScaffoldMessenger.of(context), nav = Navigator.of(context);
+    setState(() => _doing = '正在合并，按「${catFolder(cat)}」模板重新整理…');
+    try {
+      final note = Analyzer.of(store.lib, Llm.instance!).note;
+      final m = whole ? await store.mergeRecording(s.stem, note) : await store.mergeWithPrevious(s, note);
+      messenger.showSnackBar(SnackBar(content: Text('合成一段了：${hm(m.start)}–${hm(m.end)} ${m.title}')));
+      if (widget.onMerged != null) {
+        widget.onMerged!(m);
+      } else {
+        nav.maybePop();
+      }
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('没合并成，原来的几段都没动：$e')));
+    }
+    if (mounted) setState(() => _doing = null);
+  }
+
+  Future<void> _recut() async {
+    final s = widget.scene;
+    if (_doing != null || widget.onRecut == null) return;
+    if (!await _confirm('重新切分这条录音？',
+        '整条录音按「一个场合一段」重新切场景、重新整理（一般一两分钟，进度看左下角录音卡那栏）。\n'
+            '这条录音里手动改过的类别、合并过的段会被新的结果替换；打过勾的待办会带过去。',
+        '重新切分')) {
+      return;
+    }
+    if (!mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(const SnackBar(content: Text('开始重新切分这条录音，整理好会自动换上')));
+    if (widget.onMerged == null) Navigator.of(context).maybePop();
+    widget.onRecut!(s.stem).catchError((Object e) {
+      messenger.showSnackBar(SnackBar(content: Text('重新切分没成功：$e')));
+    });
+  }
+
+  Widget _btn(String label, IconData icon, VoidCallback? onPressed, String tip) => Tooltip(
+        message: tip,
+        child: TextButton.icon(
+          style: TextButton.styleFrom(
+              foregroundColor: K.mute, visualDensity: VisualDensity.compact, tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              padding: const EdgeInsets.symmetric(horizontal: 8), textStyle: const TextStyle(fontSize: 12.5)),
+          onPressed: onPressed,
+          icon: Icon(icon, size: 15),
+          label: Text(label),
+        ),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final s = widget.scene, store = widget.store;
+    if (_doing != null) {
+      return Row(children: [
+        const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2, color: K.accent)),
+        const SizedBox(width: 6),
+        Text(_doing!, style: const TextStyle(fontSize: 12.5, color: K.accent)),
+      ]);
+    }
+    final prev = store.previousOf(s);
+    final many = store.scenesOf(s.stem).where((x) => !x.noise).length > 1;
+    return Wrap(spacing: 2, runSpacing: 2, children: [
+      if (prev != null)
+        _btn('跟上一段合并', Icons.merge_type, () => _merge(false),
+            '跟「${hm(prev.start)} ${prev.title}」合成一段（同一场会被拆开了时用）'),
+      if (many) _btn('整条录音当一段', Icons.unfold_less, () => _merge(true), '这条录音里所有段合成一段'),
+      if (widget.onRecut != null)
+        _btn('重新切分这条录音', Icons.content_cut, _recut, '整条录音按「一个场合一段」重新切场景、重新整理'),
+    ]);
   }
 }
 
