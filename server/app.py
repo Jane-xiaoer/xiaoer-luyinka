@@ -317,6 +317,7 @@ ol{{color:#4f6a64;line-height:1.9;padding-left:20px}} ol li::marker{{color:#d95e
 # ───────── HTTP ─────────
 
 class H(BaseHTTPRequestHandler):
+    timeout = 120  # 一个连接 2 分钟没收到数据就断，握手不完的不会一直占着线程
     def log_message(self, *a):
         pass
 
@@ -460,7 +461,9 @@ def main():
 
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         ctx.load_cert_chain(args.tls_cert, args.tls_key)
-        httpd.socket = ctx.wrap_socket(httpd.socket, server_side=True)
+        # 握手放到各自的请求线程里做（读第一个字节时），别在 accept() 里：
+        # 以前有人连上 8443 不握手（扫描器），主线程卡在 accept 里的握手上，整个云端不再接新连接。
+        httpd.socket = ctx.wrap_socket(httpd.socket, server_side=True, do_handshake_on_connect=False)
     log(f"录音卡云端在 {'https' if args.tls_cert else 'http'}://{args.host}:{args.port}，数据 {DATA}")
     httpd.serve_forever()
 
