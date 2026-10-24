@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:luyinka/cloud.dart';
 import 'package:luyinka/home.dart';
+import 'package:luyinka/live.dart';
 import 'package:luyinka/library.dart';
 import 'package:luyinka/store.dart';
 import 'package:luyinka/sync.dart';
@@ -50,7 +51,7 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     final syncer = Syncer(store, Cloud('http://127.0.0.1:9', token: 't'), (_) async => null, () async => [], () => 'Asia/Shanghai');
-    await tester.pumpWidget(MaterialApp(home: Home(store: store, syncer: syncer)));
+    await tester.pumpWidget(MaterialApp(home: Home(store: store, syncer: syncer, live: LiveSession(store, tmp, () async {}, shareMemory: false))));
 
     expect(find.text('待办'), findsOneWidget);
     expect(find.text('每周回顾'), findsOneWidget);

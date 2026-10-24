@@ -46,6 +46,8 @@ class Library {
   File get quickActionsFile => File('$path/模板/一键按钮.md');
   File get styleFile => File('$path/模板/我的写作风格.md');
   File get vocabFile => File('$path/模板/常用词.md');
+  File get polishFile => File('$path/模板/会议笔记·顺一下.md');
+  Directory get liveDir => Directory('$path/现场会议');
 
   Future<void> ensure() async {
     for (final d in ['.xiaoer', '录音', '逐字稿', '每日', '每周', '模板', '成稿']) {
@@ -60,6 +62,9 @@ class Library {
     if (!await quickActionsFile.exists()) await quickActionsFile.writeAsString(quickActionsMd(quickActions));
     if (!await styleFile.exists()) await styleFile.writeAsString(defaultStyle);
     if (!await vocabFile.exists()) await vocabFile.writeAsString(defaultVocab);
+    if (!await polishFile.exists() || legacyPolish.map((x) => x.trim()).contains((await polishFile.readAsString()).trim())) {
+      await polishFile.writeAsString(defaultPolish); // 没改过的旧默认换成新的
+    }
     final readme = File('$path/说明.md');
     if (!await readme.exists()) {
       await readme.writeAsString('''# 小耳录音卡 · 资料文件夹
@@ -76,6 +81,8 @@ class Library {
 - 模板/：每一类怎么整理。直接改这些 .md，下次整理就按你改过的来
 - 模板/一键按钮.md：每一类下面「拿去用」按钮让小耳写什么；模板/我的写作风格.md：让小耳写文章、朋友圈时照着的口吻
 - 模板/常用词.md：你常提到的人名、品牌、专有名词，整理时照它把转写里听错的字改回来
+- 模板/会议笔记·顺一下.md：现场会议里「顺一下」怎么帮你理笔记
+- 现场会议/：现场会议里你自己记的笔记（原话全文在 逐字稿/）
 - 成稿/：在对话里让小耳写好的文章、朋友圈、纪要消息，点「存成稿」存在这
 ''');
     }
@@ -118,6 +125,47 @@ class Library {
     } catch (_) {
       return '';
     }
+  }
+
+  /// 词库（模板/常用词.md）里的词：现场会议出字时替换、「词库」窗口里编辑。
+  List<VocabEntry> vocabEntries() {
+    try {
+      return vocabFile.existsSync() ? parseVocab(vocabFile.readAsStringSync()).$1 : [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /// 存词库：只换掉「- 词」那些行，文件里别的正文原样留着。
+  Future<void> saveVocab(List<VocabEntry> entries) async {
+    final extra = await vocabFile.exists() ? parseVocab(await vocabFile.readAsString()).$2 : <String>[];
+    await vocabFile.writeAsString(vocabMd(entries, extra));
+  }
+
+  /// 「顺一下」的要求（模板文件改坏了 / 删光了就用默认的）。
+  String polishPrompt() {
+    try {
+      final t = polishFile.existsSync() ? cleanPolish(polishFile.readAsStringSync()) : '';
+      return t.isEmpty ? cleanPolish(defaultPolish) : t;
+    } catch (_) {
+      return cleanPolish(defaultPolish);
+    }
+  }
+
+  /// 现场会议我记的笔记：现场会议/<日期 时分> <标题>.md（全文逐字稿在 逐字稿/<录音>.md）。
+  Future<void> writeLiveNotes(String stem, String title, DateTime start, String notes) async {
+    await liveDir.create(recursive: true);
+    final f = File('${liveDir.path}/${_day(start)} ${_hm(start, '')} ${safe(title)}.md');
+    await f.writeAsString([
+      '# $title',
+      '',
+      '时间：${_day(start)} ${_hm(start)}　·　来源：现场会议　·　逐字稿：逐字稿/$stem.md',
+      '',
+      '## 我的笔记',
+      '',
+      notes.isEmpty ? '（这场会没有记笔记）' : notes,
+      '',
+    ].join('\n'));
   }
 
   Future<List<String>> subjects() async {

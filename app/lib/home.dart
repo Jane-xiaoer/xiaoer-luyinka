@@ -12,6 +12,8 @@ import 'cards.dart';
 import 'drafts.dart';
 import 'handoff.dart';
 import 'ideas.dart';
+import 'live.dart';
+import 'live_view.dart';
 import 'llm.dart';
 import 'md_view.dart';
 import 'people.dart';
@@ -28,7 +30,8 @@ import 'weekly.dart';
 class Home extends StatefulWidget {
   final Store store;
   final Syncer syncer;
-  const Home({super.key, required this.store, required this.syncer});
+  final LiveSession live;
+  const Home({super.key, required this.store, required this.syncer, required this.live});
   @override
   State<Home> createState() => _HomeState();
 }
@@ -36,11 +39,12 @@ class Home extends StatefulWidget {
 class _HomeState extends State<Home> {
   String? _day;
   String? _sceneId;
-  int _mode = 0; // 0 按天看 · 1 按类别看 · 2 按人看 · 3 待办 · 4 每周回顾
+  int _mode = 0; // 0 按天看 · 1 按类别看 · 2 按人看 · 3 待办 · 4 每周回顾 · 5 现场会议
   bool get _byCat => _mode == 1;
   bool get _byPerson => _mode == 2;
   bool get _todos => _mode == 3;
   bool get _weeks => _mode == 4;
+  bool get _live => _mode == 5;
   String? _cat;
   String? _person;
   String? _week; // 每周回顾：选中的那周（2026-W42）
@@ -324,7 +328,7 @@ class _HomeState extends State<Home> {
                 store: store, syncer: widget.syncer, day: _todos ? null : day, onPick: pickDay,
                 mode: _mode, cat: cat, onPickCat: pickCat, onMode: setMode,
                 people: people, person: person, onPickPerson: pickPerson,
-                todoCount: openTodos, weeks: weeks, week: week?.key, onPickWeek: pickWeek,
+                todoCount: openTodos, weeks: weeks, week: week?.key, onPickWeek: pickWeek, live: widget.live,
                 search: SearchField(controller: _search, onChanged: _onSearch, onClear: clearSearch))),
         Expanded(child: Container(
           margin: const EdgeInsets.fromLTRB(0, 12, 12, 12),
@@ -334,7 +338,9 @@ class _HomeState extends State<Home> {
             borderRadius: BorderRadius.circular(22),
             boxShadow: const [BoxShadow(color: Color(0x261F4A44), blurRadius: 24, offset: Offset(0, 8))],
           ),
-          child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          child: _live && !searching
+              ? LiveView(live: widget.live, top: 24)
+              : Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         SizedBox(
           width: (MediaQuery.sizeOf(context).width * 0.36).clamp(360, 470).toDouble(),
           child: searching
@@ -387,10 +393,17 @@ class _HomeState extends State<Home> {
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
           child: SearchField(controller: _search, onChanged: _onSearch, onClear: clearSearch),
         ),
-        if (store.days.isNotEmpty && !searching)
+        if (!searching)
           SizedBox(
             height: 48,
             child: ListView(scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: 12), children: [
+              Padding(
+                padding: const EdgeInsets.only(right: 10, top: 6, bottom: 6),
+                child: ChoiceChip(
+                    avatar: const Icon(Icons.mic_none_rounded, size: 16), label: const Text('现场会议'),
+                    selected: _live, onSelected: (_) => setMode(5)),
+              ),
+              if (store.days.isNotEmpty) ...[
               Padding(
                 padding: const EdgeInsets.only(right: 10, top: 6, bottom: 6),
                 child: ModeSwitch(mode: _mode, onMode: setMode, compact: true),
@@ -435,10 +448,13 @@ class _HomeState extends State<Home> {
                     padding: const EdgeInsets.only(right: 8, top: 6, bottom: 6),
                     child: ChoiceChip(label: Text(dayTitle(d, short: true)), selected: d == day, onSelected: (_) => pickDay(d)),
                   ),
+              ],
             ]),
           ),
         Expanded(
-          child: searching
+          child: _live && !searching
+              ? LiveView(live: widget.live)
+              : searching
               ? SearchColumn(store: store, hits: hits, scenes: scenes, topic: topic, selected: null,
                   draftHits: draftHits, onPickDraft: _openNarrowDraft,
                   askKey: _askKey, onOpen: openFound, onPick: _openNarrow)
@@ -590,11 +606,12 @@ class Sidebar extends StatelessWidget {
   final List<Week> weeks;
   final String? week;
   final void Function(String)? onPickWeek;
+  final LiveSession? live;
   const Sidebar(
       {super.key, required this.store, required this.syncer, required this.day, required this.onPick,
       required this.mode, required this.cat, required this.onPickCat, required this.onMode,
       required this.people, required this.person, required this.onPickPerson, this.search,
-      this.todoCount = 0, this.weeks = const [], this.week, this.onPickWeek});
+      this.todoCount = 0, this.weeks = const [], this.week, this.onPickWeek, this.live});
 
   @override
   Widget build(BuildContext context) => Container(
@@ -616,6 +633,8 @@ class Sidebar extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
             child: Column(children: [
+              NavRow(icon: Icons.mic_none_rounded, text: '现场会议', selected: mode == 5, onTap: () => onMode(5),
+                  trailing: live == null ? null : LiveDot(live: live!)),
               NavRow(icon: Icons.checklist_rounded, text: '待办', count: todoCount, selected: mode == 3, onTap: () => onMode(3)),
               NavRow(icon: Icons.event_note_outlined, text: '每周回顾', selected: mode == 4, onTap: () => onMode(4)),
             ]),
@@ -2593,7 +2612,9 @@ class NavRow extends StatelessWidget {
   final int? count;
   final bool selected;
   final VoidCallback onTap;
-  const NavRow({super.key, required this.icon, required this.text, this.count, required this.selected, required this.onTap});
+  final Widget? trailing;
+  const NavRow({super.key, required this.icon, required this.text, this.count, required this.selected, required this.onTap,
+      this.trailing});
 
   @override
   Widget build(BuildContext context) => Padding(
@@ -2618,6 +2639,7 @@ class NavRow extends StatelessWidget {
                     decoration: BoxDecoration(color: K.todoSoft, borderRadius: BorderRadius.circular(99)),
                     child: Text('$count', style: const TextStyle(fontSize: 12, color: K.todo, fontWeight: FontWeight.w700)),
                   ),
+                ?trailing,
               ]),
             ),
           ),

@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 import 'card/ble.dart';
 import 'cloud.dart';
 import 'home.dart';
+import 'live.dart';
 import 'store.dart';
 import 'sync.dart';
 import 'theme.dart';
@@ -15,6 +16,13 @@ const defaultCloud = String.fromEnvironment('LUYINKA_CLOUD', defaultValue: 'http
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // 远程测试机自检现场会议的识别（不开界面、不碰资料）：LUYINKA_LIVE_SELFTEST="<wav>|<输出目录>"
+  final selftest = Platform.environment['LUYINKA_LIVE_SELFTEST'];
+  if (selftest != null && selftest.contains('|')) {
+    final [wav, out] = selftest.split('|');
+    await liveSelfTest(wav, out);
+    exit(0);
+  }
   final dir = Directory('${(await getApplicationSupportDirectory()).path}/luyinka');
   await dir.create(recursive: true);
   final store = Store(dir);
@@ -31,7 +39,9 @@ Future<void> main() async {
     () async => [for (final d in await BleLink.scan()) CardChoice(d.deviceId, BleLink.label(d), d.rssi)],
     deviceTimezone,
   );
-  runApp(LuyinkaApp(store: store, syncer: syncer));
+  // 现场会议：收进录音卡后让同步器跑一轮，把它排进整理
+  final live = LiveSession(store, dir, () => syncer.run(fromCard: false));
+  runApp(LuyinkaApp(store: store, syncer: syncer, live: live));
   syncer.start();
 }
 
@@ -46,13 +56,14 @@ String deviceTimezone() {
 class LuyinkaApp extends StatelessWidget {
   final Store store;
   final Syncer syncer;
-  const LuyinkaApp({super.key, required this.store, required this.syncer});
+  final LiveSession live;
+  const LuyinkaApp({super.key, required this.store, required this.syncer, required this.live});
 
   @override
   Widget build(BuildContext context) => MaterialApp(
         title: '小耳录音卡',
         debugShowCheckedModeBanner: false,
         theme: buildTheme(),
-        home: Home(store: store, syncer: syncer),
+        home: Home(store: store, syncer: syncer, live: live),
       );
 }
