@@ -9,6 +9,7 @@ import 'card/client.dart';
 import 'card/protocol.dart';
 import 'cloud.dart';
 import 'llm.dart';
+import 'progress.dart';
 import 'store.dart';
 import 'todos.dart';
 
@@ -99,6 +100,16 @@ class Syncer {
 
   void _changed() {
     store.save();
+    _ping();
+  }
+
+  /// 每条在路上的录音：这一步从什么时候开始、上次有进度是什么时候（横幅估剩多久、判断卡住用）。
+  final tracks = <String, Track>{};
+
+  Track track(Rec r) => tracks[r.stem] ??= Track(r.stage, DateTime.now(), r.progress, r.got, r.progress, r.sent);
+
+  void _ping() {
+    observe(tracks, store.recs.values, DateTime.now());
     onChange?.call();
   }
 
@@ -232,7 +243,7 @@ class Syncer {
         if (secs > 3) r.bps = (got - got0) / secs;
         if (now.difference(last).inMilliseconds > 500) {
           last = now;
-          onChange?.call();
+          _ping();
           _kick(r, part);
         }
       });
@@ -405,11 +416,17 @@ class Syncer {
         ..progress = 0;
       _changed();
       try {
-        final a = chat != null ? Analyzer(store.lib, chat!) : Analyzer.of(store.lib, llm);
+        final Chat base = chat ?? ((s, u) => llm.chat(s, u));
+        // 分场景那几轮不报百分比：模型每回一次话就算有进度，别被当成卡住
+        final a = Analyzer(store.lib, (s, u) async {
+          final out = await base(s, u);
+          tracks[r.stem]?.moved = DateTime.now();
+          return out;
+        });
         final before = res['scenes'] as List? ?? const [];
         res['scenes'] = await a.run(r.stem, res, progress: (d, t) {
           r.progress = t == 0 ? 0 : d * 100 ~/ t;
-          onChange?.call();
+          _ping();
         });
         carryDone(before, res['scenes']);
         await store.putResult(r.stem, res);

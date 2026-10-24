@@ -15,6 +15,7 @@ import 'ideas.dart';
 import 'llm.dart';
 import 'md_view.dart';
 import 'people.dart';
+import 'progress.dart';
 import 'search.dart';
 import 'settings.dart';
 import 'store.dart';
@@ -122,10 +123,31 @@ class _HomeState extends State<Home> {
     super.dispose();
   }
 
+  /// 左栏 / 手机日子条：有笔记的日子 + 正在处理的录音那天。
+  List<String> get dayKeys => daysWithPending(store.days.keys, store.pending);
+
   String? get day {
-    final days = store.days;
-    if (_day != null && days.containsKey(_day)) return _day;
-    return days.isEmpty ? null : days.keys.first;
+    final days = dayKeys;
+    if (_day != null && days.contains(_day)) return _day;
+    return days.firstOrNull;
+  }
+
+  /// 这一天里还在处理、还没出笔记的录音：时间线里先放占位卡。
+  List<Rec> get pendingToday => [
+        for (final r in store.pending)
+          if (day != null && recDay(r.stem) == day && store.scenesOf(r.stem).isEmpty) r,
+      ];
+
+  /// 有录音在路上：列表顶上挂横幅。
+  Widget _withBanner(Widget child, {bool compact = false}) {
+    if (store.pending.isEmpty) return child;
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Padding(
+        padding: compact ? const EdgeInsets.fromLTRB(12, 8, 12, 2) : const EdgeInsets.fromLTRB(16, 34, 16, 0),
+        child: ProgressBanner(syncer: widget.syncer, store: store, compact: compact),
+      ),
+      Expanded(child: child),
+    ]);
   }
 
   String? get cat {
@@ -160,7 +182,7 @@ class _HomeState extends State<Home> {
       ? (person == null ? [] : scenesWith(store.scenes, person!))
       : _byCat
           ? (cat == null || cat == draftsKey ? [] : store.byCategory[cat]!)
-          : (day == null ? [] : store.days[day]!);
+          : (day == null ? [] : store.days[day] ?? []);
 
   bool get inDrafts => _byCat && cat == draftsKey && !searching;
 
@@ -337,7 +359,7 @@ class _HomeState extends State<Home> {
           child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         SizedBox(
           width: (MediaQuery.sizeOf(context).width * 0.36).clamp(360, 470).toDouble(),
-          child: searching
+          child: _withBanner(searching
               ? SearchColumn(
                   store: store, hits: hits, scenes: scenes, topic: topic, selected: draft == null ? scene?.id : null, top: 34,
                   draftHits: draftHits, selectedDraft: draft?.path, onPickDraft: _pickDraft,
@@ -359,8 +381,8 @@ class _HomeState extends State<Home> {
                           askKey: _askKey, onOpen: openFound, onPick: _pickScene, top: 34,
                           onIdeas: cat == '个人感悟' ? _openIdeas : null)
                       : DayColumn(
-                          store: store, day: day, scenes: scenes, selected: scene?.id, onHandoff: _handoff,
-                          askKey: _askKey, onOpen: openFound, onPick: _pickScene),
+                          store: store, day: day, scenes: scenes, pending: pendingToday, selected: scene?.id,
+                          onHandoff: _handoff, askKey: _askKey, onOpen: openFound, onPick: _pickScene)),
         ),
         const VerticalDivider(width: 1, color: K.line),
         Expanded(
@@ -387,7 +409,7 @@ class _HomeState extends State<Home> {
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
           child: SearchField(controller: _search, onChanged: _onSearch, onClear: clearSearch),
         ),
-        if (store.days.isNotEmpty && !searching)
+        if (dayKeys.isNotEmpty && !searching)
           SizedBox(
             height: 48,
             child: ListView(scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: 12), children: [
@@ -430,7 +452,7 @@ class _HomeState extends State<Home> {
                       onSelected: (_) => pickCat(draftsKey)),
                 )
               else
-                for (final d in store.days.keys)
+                for (final d in dayKeys)
                   Padding(
                     padding: const EdgeInsets.only(right: 8, top: 6, bottom: 6),
                     child: ChoiceChip(label: Text(dayTitle(d, short: true)), selected: d == day, onSelected: (_) => pickDay(d)),
@@ -438,7 +460,7 @@ class _HomeState extends State<Home> {
             ]),
           ),
         Expanded(
-          child: searching
+          child: _withBanner(compact: true, searching
               ? SearchColumn(store: store, hits: hits, scenes: scenes, topic: topic, selected: null,
                   draftHits: draftHits, onPickDraft: _openNarrowDraft,
                   askKey: _askKey, onOpen: openFound, onPick: _openNarrow)
@@ -460,8 +482,8 @@ class _HomeState extends State<Home> {
                   : _byCat
                   ? CatColumn(store: store, cat: cat, scenes: scenes, selected: null,
                       askKey: _askKey, onOpen: openFound, onPick: _openNarrow, onIdeas: cat == '个人感悟' ? _openIdeas : null)
-                  : DayColumn(store: store, day: day, scenes: scenes, selected: null,
-                      askKey: _askKey, onOpen: openFound, onPick: _openNarrow),
+                  : DayColumn(store: store, day: day, scenes: scenes, pending: pendingToday, selected: null,
+                      askKey: _askKey, onOpen: openFound, onPick: _openNarrow)),
         ),
       ]);
 
@@ -523,6 +545,191 @@ String pullLine(Rec r) {
 
 bool _live(Syncer syncer, Store store) => syncer.card.connected || store.pending.isNotEmpty;
 
+// ───────── 处理中横幅：有录音在路上就一直挂在列表顶上，说清在干嘛、等多久、卡没卡住 ─────────
+
+class ProgressBanner extends StatefulWidget {
+  final Syncer syncer;
+  final Store store;
+  final bool compact; // 手机窄屏
+  const ProgressBanner({super.key, required this.syncer, required this.store, this.compact = false});
+  @override
+  State<ProgressBanner> createState() => _ProgressBannerState();
+}
+
+class _ProgressBannerState extends State<ProgressBanner> {
+  Timer? _tick;
+
+  @override
+  void initState() {
+    super.initState();
+    // 没有新进度时界面不会重画：隔一会儿自己重算一次「约剩多久」「卡没卡住」
+    _tick = Timer.periodic(const Duration(seconds: 10), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _tick?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final pend = widget.store.pending;
+    final r = featured(pend);
+    if (r == null) return const SizedBox.shrink();
+    final s = widget.syncer;
+    final a = activity(r, s.track(r),
+        connected: s.card.connected, now: DateTime.now(), cloudError: s.card.error, others: pend.length - 1);
+    final c = widget.compact;
+    final stalled = a.stall != null;
+    final parts = a.stall?.split(' · ') ?? const <String>[];
+    final fg = stalled ? K.accent : K.ink;
+    return Container(
+      padding: EdgeInsets.fromLTRB(c ? 14 : 18, c ? 12 : 14, c ? 14 : 18, c ? 12 : 14),
+      decoration: BoxDecoration(
+        color: stalled ? const Color(0xFFFBE8E3) : const Color(0xFFE8F0E3),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: stalled ? K.accentEdge : const Color(0xFFBFD2B6), width: 1.2),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        StepBar(step: a.step, alsoNext: a.alsoNext, stalled: stalled, compact: c),
+        SizedBox(height: c ? 10 : 12),
+        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Padding(
+            padding: EdgeInsets.only(top: c ? 3 : 4, right: 10),
+            child: stalled
+                ? Icon(Icons.error_outline_rounded, size: c ? 20 : 22, color: K.accent)
+                : SizedBox(
+                    width: c ? 16 : 18, height: c ? 16 : 18,
+                    child: const CircularProgressIndicator(strokeWidth: 2.4, color: K.live)),
+          ),
+          Expanded(
+            child: Text(stalled ? parts.first : a.headline,
+                style: TextStyle(fontSize: c ? 17 : 19, fontWeight: FontWeight.w700, color: fg, height: 1.35)),
+          ),
+        ]),
+        if (!stalled && a.fraction != null) ...[
+          const SizedBox(height: 10),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(99),
+            child: LinearProgressIndicator(
+                value: a.fraction, minHeight: 6, color: K.live, backgroundColor: const Color(0xFFCFDDC8)),
+          ),
+        ],
+        if (stalled)
+          for (final p in parts.skip(1))
+            Padding(
+              padding: const EdgeInsets.only(top: 4, left: 32),
+              child: Text(p, style: const TextStyle(fontSize: 13.5, color: K.ink, height: 1.45)),
+            ),
+        Padding(
+          padding: EdgeInsets.only(top: 6, left: stalled ? 32 : 0),
+          child: Text(
+            stalled ? '眼下：${a.headline}' : (a.detail ?? ''),
+            style: const TextStyle(fontSize: 12.5, color: K.mute, height: 1.45),
+          ),
+        ),
+        Padding(
+          padding: EdgeInsets.only(top: 4, left: stalled ? 32 : 0),
+          child: Text(a.comfort, style: TextStyle(fontSize: c ? 13 : 13.5, color: K.mute, height: 1.5)),
+        ),
+      ]),
+    );
+  }
+}
+
+/// ① 从卡上拉 → ② 云端转写 → ③ 整理：做完的打勾，当前这步高亮。
+class StepBar extends StatelessWidget {
+  final int step;
+  final bool alsoNext, stalled, compact;
+  const StepBar({super.key, required this.step, this.alsoNext = false, this.stalled = false, this.compact = false});
+
+  @override
+  Widget build(BuildContext context) {
+    final names = compact ? const ['从卡上拉', '云端转写', '整理'] : const ['从卡上拉', '云端转写', '整理成笔记'];
+    Widget dot(int i) {
+      final done = i < step;
+      final now = i == step || (alsoNext && i == step + 1);
+      final color = done ? K.live : (now ? (stalled && i == step ? K.accent : K.ink) : K.faint);
+      return Row(mainAxisSize: MainAxisSize.min, children: [
+        Container(
+          width: 22, height: 22,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: done ? K.live : (now ? color : Colors.transparent),
+            border: Border.all(color: color, width: 1.5),
+          ),
+          child: done
+              ? const Icon(Icons.check_rounded, size: 15, color: Colors.white)
+              : Text('${i + 1}', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: now ? Colors.white : K.faint)),
+        ),
+        const SizedBox(width: 6),
+        Text(names[i],
+            style: TextStyle(
+                fontSize: compact ? 13 : 13.5, color: color, fontWeight: now ? FontWeight.w700 : FontWeight.w500)),
+      ]);
+    }
+
+    Widget line(int i) => Expanded(
+          child: Container(
+            height: 2,
+            margin: const EdgeInsets.symmetric(horizontal: 8),
+            color: i < step ? K.live : const Color(0xFFCFDDC8),
+          ),
+        );
+    return Row(children: [dot(0), line(0), dot(1), line(1), dot(2)]);
+  }
+}
+
+/// 时间线里的灰色占位卡：正在处理的录音先在它的时间位置占个座，出结果后换成真笔记。
+class PendingRow extends StatelessWidget {
+  final Rec rec;
+  const PendingRow({super.key, required this.rec});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = recStart(rec.stem);
+    final f = switch (rec.stage) {
+      'pulling' => rec.size > 0 ? rec.got / rec.size : null,
+      'processing' || 'analyzing' => rec.progress / 100,
+      _ => null,
+    };
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(12, 13, 14, 13),
+        decoration: BoxDecoration(
+          color: const Color(0xFFEDEAE3),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: K.lineStrong),
+        ),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          SizedBox(
+              width: 52,
+              child: Text(t == null ? '' : hm(t),
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: K.faint,
+                      fontFeatures: [FontFeature.tabularFigures()]))),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(placeholderLine(rec), style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15, color: K.mute)),
+              const SizedBox(height: 6),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(99),
+                child: LinearProgressIndicator(
+                    value: f?.clamp(0.0, 1.0), minHeight: 4, color: K.faint, backgroundColor: K.line),
+              ),
+              const SizedBox(height: 6),
+              const Text('还在处理，好了这里自动换成笔记', style: TextStyle(fontSize: 12.5, color: K.faint)),
+            ]),
+          ),
+        ]),
+      ),
+    );
+  }
+}
 // ───────── 手机顶栏：卡的状态 + 交给 Agent ─────────
 
 class TopBar extends StatelessWidget {
@@ -626,7 +833,7 @@ class Sidebar extends StatelessWidget {
             1 => CatNav(store: store, cat: cat, onPick: onPickCat),
             2 => PeopleNav(people: people, person: person, onPick: onPickPerson),
             4 => WeekNav(store: store, weeks: weeks, week: week, onPick: (k) => onPickWeek?.call(k)),
-            _ => DayNav(store: store, day: day, onPick: onPick),
+            _ => DayNav(store: store, days: daysWithPending(store.days.keys, store.pending), day: day, onPick: onPick),
           }),
           CardPanel(syncer: syncer, store: store),
         ]),
@@ -816,13 +1023,14 @@ class PeopleNav extends StatelessWidget {
 
 class DayNav extends StatelessWidget {
   final Store store;
+  final List<String> days;
   final String? day;
   final void Function(String) onPick;
-  const DayNav({super.key, required this.store, required this.day, required this.onPick});
+  const DayNav({super.key, required this.store, required this.days, required this.day, required this.onPick});
 
   @override
   Widget build(BuildContext context) => ListView(padding: const EdgeInsets.symmetric(horizontal: 10), children: [
-        for (final e in store.days.entries)
+        for (final e in [for (final k in days) MapEntry(k, store.days[k] ?? const <Scene>[])])
           Padding(
             padding: const EdgeInsets.only(bottom: 2),
             child: Material(
@@ -839,7 +1047,7 @@ class DayNav extends StatelessWidget {
                             style: TextStyle(
                                 fontWeight: e.key == day ? FontWeight.w600 : FontWeight.w400,
                                 color: e.key == day ? K.ink : K.mute))),
-                    Text('${e.value.length}',
+                    Text(e.value.isEmpty ? '处理中' : '${e.value.length}',
                         style: TextStyle(fontSize: 12, color: e.key == day ? K.accent : K.faint,
                             fontWeight: FontWeight.w600)),
                   ]),
@@ -917,6 +1125,7 @@ class DayColumn extends StatelessWidget {
   final Store store;
   final String? day;
   final List<Scene> scenes;
+  final List<Rec> pending; // 这天还在处理的录音：按开录时间插一张占位卡
   final String? selected;
   final void Function(Scene) onPick;
   final VoidCallback? onHandoff; // 宽屏：「交给 Agent」放在日期右边；手机在顶栏
@@ -924,7 +1133,7 @@ class DayColumn extends StatelessWidget {
   final void Function(Scene)? onOpen; // 对话里找到的那段被点了
   const DayColumn(
       {super.key, required this.store, required this.day, required this.scenes, required this.selected, required this.onPick,
-      this.onHandoff, this.askKey, this.onOpen});
+      this.pending = const [], this.onHandoff, this.askKey, this.onOpen});
 
   @override
   Widget build(BuildContext context) {
@@ -956,7 +1165,14 @@ class DayColumn extends StatelessWidget {
           key: askKey, store: store, scenes: scenes, all: store.scenes, onOpen: onOpen,
           topic: 'day:$day', focus: _focus(scenes, selected),
           child: ListView(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6), children: [
-            for (final s in scenes) SceneRow(scene: s, selected: s.id == selected, onTap: () => onPick(s)),
+            for (final (t, x) in [
+              for (final s in scenes) (s.start, s),
+              for (final r in pending) (recStart(r.stem)!, r),
+            ]..sort((a, b) => a.$1.compareTo(b.$1)))
+              if (x is Scene)
+                SceneRow(scene: x, selected: x.id == selected, onTap: () => onPick(x))
+              else
+                PendingRow(key: ValueKey('pending:${(x as Rec).stem}:$t'), rec: x),
           ]),
         ),
       ),
