@@ -44,7 +44,46 @@ class Cloud {
     return d['id'] as String;
   }
 
-  /// {status: queued|working|done|error, progress, result?, error?}
+  bool? _stream;
+
+  /// 云端会不会边拉边传（老云端 /healthz 里没有 stream）。问不到就当不会，下次再问。
+  Future<bool> canStream() async {
+    if (_stream != null) return _stream!;
+    try {
+      final d = await _json(await http.get(Uri.parse('$base/healthz')).timeout(const Duration(seconds: 15)));
+      return _stream = d['stream'] == 1;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// 开一条边拉边传 → 任务 id。之后 [putPart] 一段段追加，[finish] 收尾。
+  Future<String> openStream(String name, String tz) async {
+    final uri = Uri.parse('$base/v1/recordings').replace(queryParameters: {'name': name, 'tz': tz, 'asr': '1', 'stream': '1'});
+    final d = await _json(await http.post(uri, headers: _auth));
+    if (d['stream'] != true) throw CloudError('云端不支持边拉边传');
+    return d['id'] as String;
+  }
+
+  /// 传第 [seq] 段 → 云端现在一共有几段。云端已经有这段（上次没记下成功）也算成功；
+  /// 跳号了（409）返回云端实际有几段，让调用方从那接着传。
+  Future<int> putPart(String id, int seq, Uint8List bytes) async {
+    final r = await http.post(Uri.parse('$base/v1/recordings/$id/part').replace(queryParameters: {'seq': '$seq'}),
+        headers: {..._auth, 'Content-Type': 'application/octet-stream'}, body: bytes);
+    if (r.statusCode == 409) {
+      final d = jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>;
+      return (d['parts'] as num).toInt();
+    }
+    return ((await _json(r))['parts'] as num).toInt();
+  }
+
+  /// 段都传完了：云端把各段接起来。
+  Future<void> finish(String id, int parts) async {
+    await _json(await http.post(Uri.parse('$base/v1/recordings/$id/finish').replace(queryParameters: {'parts': '$parts'}),
+        headers: _auth));
+  }
+
+  /// {status: receiving|queued|working|done|error, progress, result?, error?}
   Future<Map<String, dynamic>> job(String id) async =>
       _json(await http.get(Uri.parse('$base/v1/recordings/$id'), headers: _auth));
 

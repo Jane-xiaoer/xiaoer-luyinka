@@ -53,6 +53,10 @@ class Rec {
   int got = 0; // 已拉字节
   int progress = 0; // 云端进度 0–100
   String? job;
+  String? stream; // 边拉边传：云端那条的 id（拉完 finish 后挪到 job）
+  int sent = 0; // 边拉边传：已经传上去几段
+  bool noStream = false; // 云端那条坏了：这条改回拉完一次性上传
+  double bps = 0; // 这一轮从卡上拉的实测速度（字节/秒），不存
   String? error;
   bool deletedOnCard = false;
   int tried = 0; // 上次整理失败的时间（ms），隔一会儿再试
@@ -61,11 +65,17 @@ class Rec {
   Map<String, dynamic> toJson() => {
         'stem': stem, 'size': size, 'stage': stage, 'got': got, 'progress': progress,
         'job': job, 'error': error, 'deletedOnCard': deletedOnCard, 'tried': tried,
+        if (stream != null) 'stream': stream,
+        if (sent > 0) 'sent': sent,
+        if (noStream) 'noStream': true,
       };
   static Rec fromJson(Map<String, dynamic> j) => Rec(j['stem'], j['size'] ?? 0, j['stage'] ?? 'card')
     ..got = j['got'] ?? 0
     ..progress = j['progress'] ?? 0
     ..job = j['job']
+    ..stream = j['stream']
+    ..sent = j['sent'] ?? 0
+    ..noStream = j['noStream'] ?? false
     ..error = j['error']
     ..deletedOnCard = j['deletedOnCard'] ?? false
     ..tried = j['tried'] ?? 0;

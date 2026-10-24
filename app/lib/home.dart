@@ -493,14 +493,14 @@ class _HomeState extends State<Home> {
   final title = syncer.boundId == null ? '录音卡' : syncer.boundName;
   final pend = store.pending;
   final pulling = pend.where((r) => r.stage == 'pulling').toList();
-  if (pulling.isNotEmpty) {
-    final r = pulling.first;
-    return (title, '正在拉录音 ${r.size > 0 ? (r.got * 100 ~/ r.size) : 0}%');
+  if (pulling.isNotEmpty) return (title, pullLine(pulling.first));
+  final processing = pend.where((r) => r.stage == 'processing').toList();
+  if (processing.isNotEmpty) {
+    return (title, '云端转写 ${processing.first.progress}%${processing.length > 1 ? ' · 共 ${processing.length} 条' : ''}');
   }
-  final working = pend.where((r) => ['pulled', 'uploading', 'processing'].contains(r.stage)).length;
-  if (working > 0) return (title, '云端转写中 · $working 段');
+  if (pend.any((r) => r.stage == 'pulled' || r.stage == 'uploading')) return (title, '正在传到云端');
   final analyzing = pend.where((r) => r.stage == 'analyzing').toList();
-  if (analyzing.isNotEmpty) return (title, '正在按类别整理 ${analyzing.first.progress}%');
+  if (analyzing.isNotEmpty) return (title, '整理中 ${analyzing.first.progress}%');
   final waiting = pend.where((r) => r.stage == 'transcribed').toList();
   if (waiting.isNotEmpty) return (title, waiting.first.error ?? '等着整理 · ${waiting.length} 段');
   if (c.connected) {
@@ -511,6 +511,14 @@ class _HomeState extends State<Home> {
   if (syncer.boundId == null) return (title, c.choices.length > 1 ? '附近有 ${c.choices.length} 张卡' : '开机后放在旁边');
   if (c.lastSeen != null) return (title, '上次同步 ${hm(c.lastSeen!)}');
   return (title, c.error ?? '不在旁边，等它靠近');
+}
+
+/// 「从卡上拉 3.2 / 13.6MB · 约剩 25 分钟 · 已传云端 2 段」：剩多久按这一轮实测的速度估。
+String pullLine(Rec r) {
+  String mb(int b) => (b / 1e6).toStringAsFixed(1);
+  final left = r.size - r.got;
+  final eta = r.bps > 0 && left > 0 ? ' · 约剩 ${(left / r.bps / 60).ceil()} 分钟' : '';
+  return '从卡上拉 ${mb(r.got)} / ${mb(r.size)}MB$eta${r.sent > 0 ? ' · 已传云端 ${r.sent} 段' : ''}';
 }
 
 bool _live(Syncer syncer, Store store) => syncer.card.connected || store.pending.isNotEmpty;

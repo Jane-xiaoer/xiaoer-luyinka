@@ -5,6 +5,12 @@
     GET  /v1/recordings/<id>                  → {"status": queued|working|done|error, "progress", "result"}
     GET  /v1/recordings/<id>/audio            → m4a（App 里播放用）
     POST /v1/recordings?…&asr=1                只转写，不切场景（新版 App 自己按类别整理）
+    边拉边传（长录音别等拉完再传）：
+    POST /v1/recordings?name=&tz=&asr=1&stream=1  不带 body → {"id", "status": "receiving", "stream": true}
+    POST /v1/recordings/<id>/part?seq=N        body=接下来那一段原文件字节（App 按 40 字节帧边界切）→ {"parts": 云端已有几段}
+                                               每段一到就排进转写；重传已有的段直接回 ok，跳了号回 409 + parts
+    POST /v1/recordings/<id>/finish?parts=N    传完了：各段逐字稿按时间偏移接起来，m4a 用整条原文件出 → 之后同上面 GET
+    GET  /healthz 里 "stream": 1 = 这台云端会边拉边传（老云端没有，App 就走一次性上传）
     DELETE /v1/recordings/<id>                App 取走了 → 服务器上这条全删（服务器不留内容）
     POST /v1/llm    {"messages", "temperature"} → {"content"}         不留记录的模型中转（用户没填自己的 key 时）
     POST /v1/ask    {"question", "scenes":[…]} → {"answer"}           「问问我的录音」（旧版 App）
@@ -54,8 +60,11 @@ DAILY_SECONDS = 24 * 3600               # 每台设备每天最多处理 24 小�
 DAILY_LLM = 600                         # 每台设备每天最多调 600 次模型（一天录满约 100 次）
 KEEP_HOURS = 24                         # App 一直没来取的，过这么久也删
 SAFE = re.compile(r"^[0-9A-Za-z_.-]{1,80}$")
-JOBS: "queue.Queue[tuple[str, str]]" = queue.Queue()
+MAX_PART = 32 * 1024 * 1024             # 边拉边传的一段（App 默认 1.5MB ≈ 12 分钟）
+JOBS: "queue.Queue[tuple]" = queue.Queue()  # (token, rid) 一次性上传；(token, rid, 段号) 转一段；(token, rid, "finish") 接起来
 LOCK = threading.Lock()
+STATUS_LOCK = threading.Lock()          # status.json：后台线程写进度，请求线程收段，别互相覆盖
+PART_LOCK = threading.Lock()
 
 
 def log(*a):
@@ -95,6 +104,11 @@ def device_of(token: str) -> str | None:
     return None
 
 
+def quota_left(token: str) -> float:
+    rec = read_json(TOKENS, {}).get(token) or {}
+    return DAILY_SECONDS - (rec.get("used") or {}).get(dt.date.today().isoformat(), 0)
+
+
 def charge(token: str, seconds: float) -> bool:
     """记今天用了多少秒，超额就拒。"""
     day = dt.date.today().isoformat()
@@ -119,21 +133,36 @@ def job_dir(dev: str, rid: str) -> Path:
 
 
 def set_status(d: Path, **kw) -> None:
-    st = read_json(d / "status.json", {})
-    st.update(kw)
-    write_json(d / "status.json", st)
+    with STATUS_LOCK:
+        if not d.exists():                                   # App 已经叫删了：别把目录又建回来
+            return
+        st = read_json(d / "status.json", {})
+        st.update(kw)
+        write_json(d / "status.json", st)
+
+
+def _to_ogg(raw: bytes, ogg: Path) -> None:
+    if opus_ogg.looks_like_ogg(raw):
+        ogg.write_bytes(raw)
+    elif not opus_ogg.raw_to_ogg(raw, ogg):
+        raise ValueError("文件里没有完整的 Opus 帧")
 
 
 def process(token: str, dev: str, rid: str) -> None:
     d = job_dir(dev, rid)
     meta = read_json(d / "meta.json")
-    raw = (d / "upload.bin").read_bytes()
     set_status(d, status="working", progress=0)
     ogg = d / "audio.ogg"
-    if opus_ogg.looks_like_ogg(raw):
-        ogg.write_bytes(raw)
-    elif not opus_ogg.raw_to_ogg(raw, ogg):
-        raise ValueError("文件里没有完整的 Opus 帧")
+    _to_ogg((d / "upload.bin").read_bytes(), ogg)
+
+    def segs(prog):
+        return _segments(ogg, prog)
+    _result(token, d, meta, ogg, segs)
+    (d / "upload.bin").unlink(missing_ok=True)              # 原文件处理完就删，只留结果和播放用的 m4a
+
+
+def _result(token: str, d: Path, meta: dict, ogg: Path, segs_of) -> None:
+    """整条的 ogg + 逐字稿（segs_of(prog) 给出带秒数的句子）→ m4a + result.json，status=done。"""
     seconds = pipeline.audio_seconds(ogg)
     if not charge(token, seconds):
         raise ValueError("今天处理的录音超过 24 小时了，明天再传")
@@ -141,12 +170,14 @@ def process(token: str, dev: str, rid: str) -> None:
                    check=True)
     clock.TZ = ZoneInfo(meta["tz"])                       # 这台设备的时区（单线程按顺序处理，改全局是安全的）
     title = pipeline.nice_name(meta["name"])
+    from luyinka.transcribe import fmt_ts, to_markdown
     with tempfile.TemporaryDirectory() as td:
         md = Path(td) / f"{title}.md"
 
         def prog(done, total):
             set_status(d, progress=int(done * 80 / max(total, 1)))
-        _transcribe(ogg, md, title, prog)
+        md.write_text(to_markdown(title, segs_of(prog), {"时长": fmt_ts(seconds)}, max_sec=30, max_chars=120),
+                      encoding="utf-8")
         lines = [[scenes._clock(scenes.recording_start(md), sec), text] for sec, text in scenes.load_lines(md)]
         set_status(d, progress=85)
         cut = scenes.cut(md) if lines and not meta.get("asr") else []
@@ -160,14 +191,13 @@ def process(token: str, dev: str, rid: str) -> None:
     start = scenes.recording_start(md).isoformat(timespec="seconds") if scenes._NAME.search(title) else ""
     write_json(d / "result.json", {"recording": title, "start": start, "seconds": round(seconds, 1),
                                    "lines": lines, "scenes": cut})
-    (d / "upload.bin").unlink(missing_ok=True)              # 原文件处理完就删，只留结果和播放用的 m4a
     ogg.unlink(missing_ok=True)
     set_status(d, status="done", progress=100)
 
 
-def _transcribe(ogg: Path, md: Path, title: str, prog) -> None:
-    """转写成 md（模型常驻在 pipeline._transcriber，第一条之后不再加载）。"""
-    from luyinka.transcribe import Transcriber, fmt_ts, to_markdown
+def _segments(ogg: Path, prog=None) -> list:
+    """转写成带秒数的句子（模型常驻在 pipeline._transcriber，第一条之后不再加载）。"""
+    from luyinka.transcribe import Transcriber
 
     with tempfile.TemporaryDirectory() as td:
         wav = Path(td) / "a.wav"
@@ -175,9 +205,84 @@ def _transcribe(ogg: Path, md: Path, title: str, prog) -> None:
         with ASR_LOCK:
             if pipeline._transcriber is None:
                 pipeline._transcriber = Transcriber()
-            segs = list(pipeline._transcriber.segments(wav, prog))
-    md.write_text(to_markdown(title, segs, {"时长": fmt_ts(pipeline.audio_seconds(ogg))}, max_sec=30, max_chars=120),
-                  encoding="utf-8")
+            return list(pipeline._transcriber.segments(wav, prog))
+
+
+# ───────── 边拉边传：一段一段收、一段一段转，传完接起来 ─────────
+
+def part_file(d: Path, seq: int, ext: str = "bin") -> Path:
+    return d / f"part{seq:04d}.{ext}"
+
+
+def parts_have(d: Path) -> int:
+    """云端已经收齐的段数（从 0 连续）。"""
+    n = 0
+    while part_file(d, n).exists() or part_file(d, n, "json").exists():
+        n += 1
+    return n
+
+
+def raw_seconds(raw: bytes) -> float:
+    """裸 Opus 的时长：按帧 TOC 加起来（跟整条 ogg 的 granule 同一算法，各段偏移接起来不漂）。"""
+    return sum(opus_ogg.toc_samples_48k(f) for f in opus_ogg.split_frames(raw)) / 48000
+
+
+def stitch(parts: list[dict]) -> list:
+    """各段的句子（段内秒数）→ 整条录音的句子：每段加上前面各段的总时长。"""
+    from luyinka.transcribe import Segment
+    out, offset = [], 0.0
+    for p in parts:
+        out += [Segment(offset + a, offset + b, t) for a, b, t in p["segs"]]
+        offset += p["seconds"]
+    return out
+
+
+def _stream_progress(d: Path, extra: float = 0.0) -> None:
+    """转好的段占已收到的比例 → 0–84（接起来 85 → 100，跟一次性上传的进度接得上）。"""
+    meta = read_json(d / "meta.json") or {}
+    secs = meta.get("part_seconds") or {}
+    total = sum(secs.values()) or 1
+    done = sum(s for k, s in secs.items() if part_file(d, int(k), "json").exists())
+    set_status(d, progress=min(84, int((done + extra) * 84 / total)))
+
+
+def transcribe_part(dev: str, rid: str, seq: int) -> None:
+    d = job_dir(dev, rid)
+    src, out = part_file(d, seq), part_file(d, seq, "json")
+    if out.exists() or not src.exists():
+        return
+    if (read_json(d / "status.json") or {}).get("status") in ("done", "error"):
+        return
+    raw = src.read_bytes()
+    seconds = raw_seconds(raw)
+    with tempfile.TemporaryDirectory() as td:
+        ogg = Path(td) / "p.ogg"
+        if not opus_ogg.raw_to_ogg(raw, ogg):
+            segs = []
+        else:
+            segs = _segments(ogg, lambda done, total: _stream_progress(d, seconds * done / max(total, 1)))
+    if not d.exists():
+        return
+    write_json(out, {"seconds": seconds, "segs": [[round(s.start, 3), round(s.end, 3), s.text] for s in segs]})
+    _stream_progress(d)
+
+
+def finish_stream(token: str, dev: str, rid: str) -> None:
+    d = job_dir(dev, rid)
+    meta = read_json(d / "meta.json")
+    n = int(meta["finished"])
+    set_status(d, status="working")
+    for i in range(n):                                       # 正常早就转好了；重启丢了队列的这里补上
+        transcribe_part(dev, rid, i)
+    parts = [read_json(part_file(d, i, "json")) for i in range(n)]
+    if any(p is None for p in parts):
+        raise ValueError("有一段没收到，重新传这条")
+    ogg = d / "audio.ogg"
+    _to_ogg(b"".join(part_file(d, i).read_bytes() for i in range(n)), ogg)
+    _result(token, d, meta, ogg, lambda prog: stitch(parts))
+    for i in range(n):
+        part_file(d, i).unlink(missing_ok=True)
+        part_file(d, i, "json").unlink(missing_ok=True)
 
 
 ASR_LOCK = threading.Lock()   # 常驻的转写模型：后台整理录音和 /v1/transcribe 共用，一次只让一个用
@@ -201,14 +306,21 @@ def transcribe_snippet(pcm: bytes) -> str:
 
 def worker() -> None:
     while True:
-        token, rid = JOBS.get()
+        token, rid, *what = JOBS.get()
         dev = device_of(token)
         d = job_dir(dev, rid)
         t0 = time.time()
         try:
-            log("开始", dev, rid)
-            process(token, dev, rid)
-            log("完成", dev, rid, f"{time.time() - t0:.0f}s")
+            if not what:
+                log("开始", dev, rid)
+                process(token, dev, rid)
+            elif what[0] == "finish":
+                log("接起来", dev, rid)
+                finish_stream(token, dev, rid)
+            else:
+                log("转一段", dev, rid, what[0])
+                transcribe_part(dev, rid, what[0])
+            log("完成", dev, rid, *what, f"{time.time() - t0:.0f}s")
         except Exception as e:  # noqa: BLE001 — 一条坏了不影响下一条
             log("失败", dev, rid, traceback.format_exc()[-800:])
             set_status(d, status="error", error=str(e)[:300])
@@ -219,10 +331,20 @@ def requeue() -> None:
     db = read_json(TOKENS, {})
     by_dev = {device_of(t): t for t in db}
     for st in sorted((DATA / "devices").glob("*/*/status.json")):
-        if (read_json(st) or {}).get("status") in ("queued", "working") and (st.parent / "upload.bin").exists():
-            tok = by_dev.get(st.parent.parent.name)
-            if tok:
-                JOBS.put((tok, st.parent.name))
+        status = (read_json(st) or {}).get("status")
+        tok = by_dev.get(st.parent.parent.name)
+        if not tok or status not in ("queued", "working", "receiving"):
+            continue
+        d, rid = st.parent, st.parent.name
+        meta = read_json(d / "meta.json") or {}
+        if meta.get("stream"):
+            for i in range(parts_have(d)):
+                if not part_file(d, i, "json").exists():
+                    JOBS.put((tok, rid, i))
+            if meta.get("finished") is not None:
+                JOBS.put((tok, rid, "finish"))
+        elif (d / "upload.bin").exists():
+            JOBS.put((tok, rid))
 
 
 # ───────── 不留记录的模型中转 ─────────
@@ -259,7 +381,8 @@ def sweep() -> None:
     while True:
         cutoff = time.time() - KEEP_HOURS * 3600
         for st in (DATA / "devices").glob("*/*/status.json"):
-            if (read_json(st) or {}).get("status") in ("done", "error") and st.stat().st_mtime < cutoff:
+            # receiving：边拉边传传到一半，App 再也没来（卡丢了 / 卸载了）
+            if (read_json(st) or {}).get("status") in ("done", "error", "receiving") and st.stat().st_mtime < cutoff:
                 shutil.rmtree(st.parent, ignore_errors=True)
         time.sleep(3600)
 
@@ -343,7 +466,7 @@ class H(BaseHTTPRequestHandler):
     def do_GET(self):
         u = urlparse(self.path)
         if u.path == "/healthz":
-            return self.send(200, {"ok": True, "queue": JOBS.qsize()})
+            return self.send(200, {"ok": True, "queue": JOBS.qsize(), "stream": 1})
         if u.path in ("/", "/download", "/download/"):
             return self.send(200, download_page().encode(), "text/html; charset=utf-8")
         if u.path in ("/icon.png", "/favicon.ico"):
@@ -375,6 +498,8 @@ class H(BaseHTTPRequestHandler):
             p = d / "audio.m4a"
             return self.send(200, p.read_bytes(), "audio/mp4") if p.exists() else self.send(404, {"error": "还没好"})
         st = read_json(d / "status.json", {})
+        if (read_json(d / "meta.json") or {}).get("stream") and st.get("status") == "receiving":
+            st["parts"] = parts_have(d)
         if st.get("status") == "done":
             st["result"] = read_json(d / "result.json")
         return self.send(200, st)
@@ -406,6 +531,13 @@ class H(BaseHTTPRequestHandler):
                 if not SAFE.match(name):
                     return self.send(400, {"error": "文件名不对"})
                 ZoneInfo(tz)
+                if q.get("stream") == ["1"]:
+                    rid = f"{time.strftime('%Y%m%d%H%M%S')}-{secrets.token_hex(3)}"
+                    d = job_dir(a[1], rid)
+                    d.mkdir(parents=True)
+                    write_json(d / "meta.json", {"name": name, "tz": tz, "asr": q.get("asr") == ["1"], "stream": True})
+                    set_status(d, status="receiving", progress=0)
+                    return self.send(200, {"id": rid, "status": "receiving", "stream": True})
                 raw = self.body(MAX_UPLOAD)
                 rid = f"{time.strftime('%Y%m%d%H%M%S')}-{secrets.token_hex(3)}"
                 d = job_dir(a[1], rid)
@@ -415,6 +547,9 @@ class H(BaseHTTPRequestHandler):
                 set_status(d, status="queued", progress=0)
                 JOBS.put((a[0], rid))
                 return self.send(200, {"id": rid, "status": "queued", "ahead": JOBS.qsize() - 1})
+            m = re.match(r"^/v1/recordings/([0-9A-Za-z_-]+)/(part|finish)$", u.path)
+            if m:
+                return _stream_post(self, a, m.group(1), m.group(2), parse_qs(u.query))
             if u.path == "/v1/transcribe":
                 pcm = self.body(MAX_SNIPPET)
                 if len(pcm) < 3200 or len(pcm) % 2:
@@ -440,6 +575,50 @@ class H(BaseHTTPRequestHandler):
         except Exception as e:  # noqa: BLE001
             log("请求出错", self.path, traceback.format_exc()[-500:])
             return self.send(500, {"error": str(e)[:200]})
+
+
+def _stream_post(h: H, a: tuple[str, str], rid: str, what: str, q: dict):
+    d = job_dir(a[1], rid)
+    raw = h.body(MAX_PART) if what == "part" else b""      # 先收完再上锁：别家设备网慢不挡着别人
+    with PART_LOCK:
+        meta = read_json(d / "meta.json")
+        if not meta or not meta.get("stream"):
+            return h.send(404, {"error": "没有这条"})
+        status = (read_json(d / "status.json") or {}).get("status")
+        have = parts_have(d)
+        if what == "part":
+            seq = int(q.get("seq", ["-1"])[0])
+            if seq < have:                                   # App 没记下上次传成功了：已经有了，别重收
+                return h.send(200, {"parts": have})
+            if status != "receiving":
+                return h.send(410, {"error": "这条已经传完或出错了", "status": status})
+            if seq != have:
+                return h.send(409, {"error": f"该传第 {have} 段", "parts": have})
+            secs = raw_seconds(raw)
+            got = sum((meta.get("part_seconds") or {}).values())
+            if got + secs > quota_left(a[0]):
+                return h.send(429, {"error": "今天处理的录音超过 24 小时了，明天再传"})
+            tmp = part_file(d, seq, "tmp")
+            tmp.write_bytes(raw)
+            tmp.replace(part_file(d, seq))
+            meta.setdefault("part_seconds", {})[str(seq)] = secs
+            meta["bytes"] = meta.get("bytes", 0) + len(raw)
+            write_json(d / "meta.json", meta)
+            set_status(d, status="receiving")                # 碰一下 mtime：传着的别被 sweep 当成没人要的
+            JOBS.put((a[0], rid, seq))
+            return h.send(200, {"parts": seq + 1})
+        n = int(q.get("parts", ["-1"])[0])
+        if status != "receiving":
+            return h.send(200, {"id": rid, "status": status})  # 已经 finish 过（App 没记下）：照常
+        if n != have or n == 0:
+            return h.send(409, {"error": f"云端只收到 {have} 段", "parts": have})
+        meta["finished"] = n
+        write_json(d / "meta.json", meta)
+        set_status(d, status="queued")
+        _stream_progress(d)                                  # 按全部段重算，App 看到的进度从这往上走，不往回跳
+        JOBS.put((a[0], rid, "finish"))
+        return h.send(200, {"id": rid, "status": "queued", "ahead": JOBS.qsize() - 1})
+
 
 
 def main():

@@ -34,7 +34,7 @@ class CardClient {
   late final StreamSubscription _sub;
 
   CardClient(this.link) {
-    _sub = link.packets.listen(_q.add);
+    _sub = link.packets.listen(_q.add, onDone: _q.close); // 连接断了马上知道，不用干等 20 秒
     _it = StreamIterator(_q.stream);
   }
 

@@ -25,6 +25,9 @@ class FakeCard {
   final List<Packet> received = [];
   DateTime? clock; // 收到的对时
   int connects = 0;
+  int? bytesPerSec; // 限速：像真卡蓝牙那样慢慢回数据（null = 立刻全回）
+  int? dropAt; // 拉到这个字节数就断开蓝牙（只断一次），测断点续传
+  bool _hangUp = false;
 
   FakeCard(Map<String, List<int>> files,
       {this.id = 'FA:KE:CA:RD:00:01',
@@ -89,6 +92,15 @@ class FakeCard {
       final data = files[_key(name)];
       if (data == null) return [[typeFile, fileEnd, 1]];
       if (offset > data.length) return [[typeFile, fileEnd, 2]];
+      final cut = dropAt;
+      if (cut != null && cut > offset && cut < data.length) {
+        dropAt = null;
+        _hangUp = true;
+        return [
+          [typeFile, fileBegin, ...utf8.encode(name)],
+          for (var i = offset; i < cut; i += chunk) [typeFile, fileData, ...data.sublist(i, i + chunk > cut ? cut : i + chunk)],
+        ];
+      }
       return [
         [typeFile, fileBegin, ...utf8.encode(name)],
         for (var i = offset; i < data.length; i += chunk)
@@ -128,16 +140,34 @@ class FakeLink implements Link {
     for (final p in _in.feed(data)) {
       if (!p.crcOk) throw StateError('App 发来的包 CRC 不对');
       final replies = card.handle(p);
+      final hangUp = card._hangUp;
+      card._hangUp = false;
       // 卡是异步回的：放到下一轮事件里，别在 write 里同步回
-      scheduleMicrotask(() {
-        for (final r in replies) {
-          if (_out.isClosed) return;
-          for (final q in _back.feed(_enc.pack(r))) {
-            _out.add(q);
-          }
-        }
-      });
+      if (card.bytesPerSec == null && !hangUp) {
+        scheduleMicrotask(() => replies.forEach(_emit));
+      } else {
+        unawaited(_slow(replies, hangUp));
+      }
     }
+  }
+
+  void _emit(List<int> r) {
+    if (_out.isClosed) return;
+    for (final q in _back.feed(_enc.pack(r))) {
+      _out.add(q);
+    }
+  }
+
+  Future<void> _slow(List<List<int>> replies, bool hangUp) async {
+    await Future.delayed(Duration.zero);
+    for (final r in replies) {
+      final bps = card.bytesPerSec;
+      if (bps != null && r.length > 2 && r[0] == typeFile && r[1] == fileData) {
+        await Future.delayed(Duration(microseconds: (r.length - 2) * 1000000 ~/ bps));
+      }
+      _emit(r);
+    }
+    if (hangUp) await close(); // 蓝牙断了：App 那边等包等到流结束
   }
 
   @override

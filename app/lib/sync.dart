@@ -1,4 +1,5 @@
 // 同步：卡 → 本机 → 云端转写 → 本机按类别整理 → 资料文件夹。打开 App 自动跑，之后每 30 秒看一眼。
+// 长录音边拉边传：从卡上每拉够一段（1.5MB ≈ 12 分钟）就传上云端先转着，拉完再传最后一段、叫云端接起来。
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -15,6 +16,19 @@ typedef LinkFactory = Future<Link?> Function(String id); // 只连这一张；�
 typedef CardScanner = Future<List<CardChoice>> Function(); // 附近所有的卡，信号强的在前
 
 /// 附近扫到的一张卡。
+/// 卡上一帧 40 字节（16k 单声道 Opus，20ms）。
+const frameBytes = 40;
+
+/// 边拉边传一段多大：1.5MB ≈ 12.5 分钟。是 [frameBytes] 的整数倍，段边界正好落在帧边界上。
+const defaultPartBytes = frameBytes * 37500;
+
+/// 已经拉到 [have] 字节、传了 [sent] 段时，接下来要传的段 [(开始, 结束)]（每段 [partBytes]）。
+/// 没拉完只传满的段；[last]（拉完了）连最后不满一段的也传。
+List<(int, int)> partsToSend(int have, int sent, int partBytes, {bool last = false}) => [
+      for (var start = sent * partBytes; start < have; start += partBytes)
+        if (start + partBytes <= have) (start, start + partBytes) else if (last) (start, have),
+    ];
+
 class CardChoice {
   final String id, label;
   final int? rssi;
@@ -36,6 +50,7 @@ class Syncer {
   final LinkFactory connect;
   final CardScanner scan;
   final String Function() timezone;
+  final int partBytes;
   final card = CardState();
   bool _busy = false;
   Timer? _timer;
@@ -44,7 +59,8 @@ class Syncer {
   late final Llm llm;
   Chat? chat; // 测试时换成假的
 
-  Syncer(this.store, this.cloud, this.connect, this.scan, this.timezone, {this.chat}) {
+  Syncer(this.store, this.cloud, this.connect, this.scan, this.timezone, {this.chat, this.partBytes = defaultPartBytes})
+      : assert(partBytes % frameBytes == 0) {
     llm = Llm(cloud, () => Map<String, dynamic>.from(store.settings['llm'] ?? {}));
     cloud.onToken = (t) {
       store.settings['token'] = t;
@@ -89,6 +105,7 @@ class Syncer {
   void start() {
     // 旧版整理的（还没按类别模板写笔记）：排进「待整理」，升级后自动按新模板重整一遍
     for (final r in store.recs.values.where((r) => r.stage == 'done')) {
+      r.progress = 0; // 旧版做完了进度还停在半截
       final res = store.readResult(r.stem);
       final sc = res?['scenes'] as List?;
       if (sc != null && sc.isNotEmpty && sc.every((x) => x is Map && !x.containsKey('body')) && (res?['lines'] as List?)?.isNotEmpty == true) {
@@ -127,6 +144,11 @@ class Syncer {
           r
             ..stage = 'pulled'
             ..job = null;
+        }
+        for (final r in store.recs.values) {
+          r
+            ..stream = null
+            ..sent = 0;
         }
       } else {
         card.error = e.message;
@@ -194,19 +216,98 @@ class Syncer {
 
   Future<void> _download(CardClient c, RemoteFile f, Rec r) async {
     r.stage = 'pulling';
-    var last = DateTime.now();
-    await c.download(f, store.raw(f.stem, part: true), progress: (got, total) {
-      r.got = got;
-      if (DateTime.now().difference(last).inMilliseconds > 500) {
-        last = DateTime.now();
-        onChange?.call();
-      }
-    });
-    await store.raw(f.stem, part: true).rename(store.raw(f.stem).path);
+    final part = store.raw(f.stem, part: true);
+    final t0 = DateTime.now();
+    final got0 = await part.exists() ? await part.length() : 0;
+    r
+      ..got = got0
+      ..bps = 0;
+    var last = t0;
+    _kick(r, part); // 上一轮（或 App 重启前）已经拉下来的，先把满的段传了
+    try {
+      await c.download(f, part, progress: (got, total) {
+        r.got = got;
+        final now = DateTime.now();
+        final secs = now.difference(t0).inMilliseconds / 1000;
+        if (secs > 3) r.bps = (got - got0) / secs;
+        if (now.difference(last).inMilliseconds > 500) {
+          last = now;
+          onChange?.call();
+          _kick(r, part);
+        }
+      });
+    } finally {
+      await _pumping; // 正在传的那段等它传完，别跟下一轮抢
+      r.bps = 0;
+    }
+    await part.rename(store.raw(f.stem).path);
     r
       ..stage = 'pulled'
       ..got = r.size;
     _changed();
+  }
+
+  Future<void> _pumping = Future.value();
+  bool _pumpBusy = false;
+  DateTime? _pumpFailed;
+
+  /// 拉卡的同时：攒够一段就在后台传上去（不挡着拉卡）。传失败了 30 秒内不再试，拉完那一下会补传。
+  void _kick(Rec r, File src) {
+    if (_pumpBusy || r.got < (r.sent + 1) * partBytes) return;
+    if (_pumpFailed != null && DateTime.now().difference(_pumpFailed!).inSeconds < 30) return;
+    _pumpBusy = true;
+    _pumping = _stream(r, src).catchError((_) => _pumpFailed = DateTime.now()).whenComplete(() => _pumpBusy = false);
+  }
+
+  /// 边拉边传：把 [src] 里还没传的满段传上去；[last]（拉完了）连最后一段也传，再叫云端接起来。
+  /// 不满一段的短录音、云端不支持的、云端那条坏了的：什么都不做，拉完走一次性上传。
+  Future<void> _stream(Rec r, File src, {bool last = false}) async {
+    if (r.job != null || r.noStream) return;
+    if (r.stream == null) {
+      if (await src.length() < partBytes || !await cloud.canStream()) return;
+      r
+        ..stream = await cloud.openStream('${r.stem}.', timezone())
+        ..sent = 0;
+      _changed();
+    }
+    final id = r.stream!;
+    try {
+      final have = await src.length();
+      final raf = await src.open();
+      try {
+        while (true) {
+          final next = partsToSend(have, r.sent, partBytes, last: last).firstOrNull;
+          if (next == null) break;
+          await raf.setPosition(next.$1);
+          final bytes = await raf.read(next.$2 - next.$1);
+          // 云端回它实际有几段：重传了已有的、或跳了号，都按它说的接着来
+          r.sent = await cloud.putPart(id, r.sent, bytes);
+          _changed();
+        }
+      } finally {
+        await raf.close();
+      }
+      if (!last) return;
+      try {
+        await cloud.finish(id, r.sent);
+      } on CloudError catch (e) {
+        if (e.status == 409) r.sent = 0; // 云端段数跟这边对不上：下回从头对一遍（已有的段云端直接认，不重收）
+        rethrow;
+      }
+      r
+        ..job = id
+        ..stream = null;
+    } on CloudError catch (e) {
+      if (e.status == 404 || e.status == 410) {
+        // 云端那条没了（太久没传被清掉）→ 重开一条；坏了 / 已经结束 → 这条改回一次性上传
+        r
+          ..stream = null
+          ..sent = 0
+          ..noStream = e.status == 410;
+        _changed();
+      }
+      rethrow;
+    }
   }
 
   Future<void> _upload() async {
@@ -216,9 +317,11 @@ class Syncer {
       r.stage = 'uploading';
       _changed();
       try {
+        await _stream(r, f, last: true);
+        r.job ??= await cloud.upload('${r.stem}.', await f.readAsBytes(), timezone());
         r
-          ..job = await cloud.upload('${r.stem}.', await f.readAsBytes(), timezone())
           ..stage = 'processing'
+          ..progress = 0
           ..error = null;
       } catch (e) {
         r
@@ -248,6 +351,7 @@ class Syncer {
         r
           ..stage = old || lines.isEmpty ? 'done' : 'transcribed'
           ..job = null
+          ..progress = 0
           ..error = null;
       } else if (j['status'] == 'error') {
         r
@@ -311,6 +415,7 @@ class Syncer {
         await store.putResult(r.stem, res);
         r
           ..stage = 'done'
+          ..progress = 0
           ..error = null;
       } catch (e) {
         r
