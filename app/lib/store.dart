@@ -297,6 +297,16 @@ class Store extends ChangeNotifier {
   List<Scene> scenesOf(String stem) => [...?_scenes[stem]];
   Iterable<String> get stems => _scenes.keys; // 资料里有的所有录音
 
+  /// 按 id 找一段（所有录音里找，含杂音）。
+  Scene? sceneById(String id) {
+    for (final l in _scenes.values) {
+      for (final s in l) {
+        if (s.id == id) return s;
+      }
+    }
+    return null;
+  }
+
   /// 所有场景（不含杂音），新的在前。
   List<Scene> get scenes {
     final all = [for (final l in _scenes.values) ...l.where((s) => !s.noise)];

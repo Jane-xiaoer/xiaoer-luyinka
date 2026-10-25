@@ -4,6 +4,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'actions.dart';
 import 'analyze.dart';
 import 'card/client.dart';
 import 'card/protocol.dart';
@@ -139,6 +140,11 @@ class Syncer {
     try {
       // 不用云端，先收：云端登记不上也不耽误外面放进来的。它出错不能拖垮拉卡（每条的错它自己报）
       await importInbox().catchError((_) {});
+      // 外面的程序（别的 AI、脚本、Obsidian…）放进 .xiaoer/commands/ 的修改命令（见 actions.dart）
+      if (store.hasLib) {
+        await runCommandInbox(store, (chat != null ? Analyzer(store.lib, chat!) : Analyzer.of(store.lib, llm)).note)
+            .catchError((_) => 0);
+      }
       cloud.token ??= store.settings['token'] as String?;
       if (cloud.token == null) {
         store.settings['token'] = await cloud.register();

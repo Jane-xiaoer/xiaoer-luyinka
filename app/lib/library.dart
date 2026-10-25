@@ -93,8 +93,14 @@ class Library {
 - 模板/会议笔记·顺一下.md：现场会议里「顺一下」怎么帮你理笔记
 - 现场会议/：现场会议里你自己记的笔记（原话全文在 逐字稿/）
 - 成稿/：在对话里让小耳写好的文章、朋友圈、纪要消息，点「存成稿」存在这
+- 给AI的接口.md：别的 AI / 脚本 / Obsidian 怎么读这里、怎么让小耳改记录
 ''');
     }
+    // App 维护的说明：每次打开都按当前版本写（别手改，改了会被换回来）
+    final api = File('$path/给AI的接口.md');
+    try {
+      if (!await api.exists() || await api.readAsString() != aiInterfaceMd) await api.writeAsString(aiInterfaceMd);
+    } catch (_) {} // 被 iCloud 挪到云上了读不出：下次再说
   }
 
   Future<String> template(String cat) async {
@@ -295,7 +301,22 @@ String _pad(int n) => n.toString().padLeft(2, '0');
 /// 一段 → 独立的 Markdown 笔记。
 String noteMd(Scene s) {
   final mins = s.end.difference(s.start).inMinutes;
-  final b = StringBuffer('# ${s.title}\n\n');
+  // 开头的属性（YAML）：Obsidian 显示成「属性」能筛能搜；id 给别的 AI / 脚本发修改命令用（见 给AI的接口.md）
+  String y(String v) => '"${v.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"';
+  final b = StringBuffer('---\n')
+    ..writeln('id: ${y(s.id)}')
+    ..writeln('类别: ${y(catKey(s.category))}')
+    ..writeln('来源: ${y(sourceOf(s.stem))}')
+    ..writeln('日期: ${_day(s.start)}')
+    ..writeln('时间: ${y('${_hm(s.start)}–${_hm(s.end)}')}');
+  if (s.place.isNotEmpty) b.writeln('地点: ${y(s.place)}');
+  if (s.people.isNotEmpty) b.writeln('人物: [${s.people.map(y).join(', ')}]');
+  if (s.subject.isNotEmpty) b.writeln('调研对象: ${y(s.subject)}');
+  b
+    ..writeln('录音: ${y('录音/${s.stem}.m4a')}')
+    ..writeln('tags: [小耳录音卡, ${y(catKey(s.category))}]')
+    ..writeln('---\n')
+    ..write('# ${s.title}\n\n');
   b.writeln('- **时间**：${_day(s.start)} ${_hm(s.start)}–${_hm(s.end)}（${mins < 1 ? '不到 1' : mins} 分钟）');
   if (s.place.isNotEmpty) b.writeln('- **地点**：${s.place}');
   if (s.people.isNotEmpty) b.writeln('- **人物**：${s.people.join('、')}');
@@ -351,3 +372,55 @@ Future<void> migrateOld(Directory old, Library lib) async {
 }
 
 String prettyJson(Object o) => const JsonEncoder.withIndent(' ').convert(o);
+
+/// 资料文件夹里的「给AI的接口.md」：告诉别的 AI / 脚本 / Obsidian 这里怎么组织、怎么让小耳改记录。
+const aiInterfaceMd = r'''# 小耳录音卡 · 给 AI 和别的程序的接口
+
+（这份由小耳录音卡 App 维护，每次打开 App 按最新版本重写，别手改。）
+
+这个文件夹就是小耳录音卡的全部资料，都是普通的 Markdown / JSON 文件。任何 AI（Claude Code、Codex、ChatGPT 桌面版…）、
+脚本、Obsidian 都可以直接读；要**改**记录（类别、标题、人物…），按下面的「改记录」放一个命令文件，App 会照着改。
+
+## 用 Obsidian 打开
+
+Obsidian →「打开文件夹作为仓库」→ 选这个文件夹就行。每篇笔记开头有「属性」：
+`id`（这一段的编号，改记录时用）、`类别`、`来源`（录音卡 / 录音豆 / 现场会议 / 小耳语音）、`日期`、`时间`、`地点`、`人物`、`录音`、`tags`。
+可以按属性筛选、搜索、建视图。
+
+注意：笔记是 App 按「索引」生成的。直接在 Obsidian 里改正文可以，但这一段以后被重新整理（比如改了类别）时会按索引重写，
+你的手改会被覆盖。**要改类别、标题、人物这些，请用下面的命令**，App 会连索引、笔记、每日时间线一起改好。
+
+## 文件夹里有什么
+
+- `<类别文件夹>/<日期 钟点> <标题>.md`：每一段的笔记（会议纪要/、听课讲座/、个人感悟/、自言自语/ …）
+- `每日/<日期>.md`：一天的时间线；`每周/`：每周回顾
+- `逐字稿/<录音>.md`：一条录音的全文；`录音/<录音>.m4a`：原声
+- `.xiaoer/<录音>.json`：索引（App 用的，里面 scenes 是这条录音切出来的各段，含 id、类别、标题、笔记、待办）。**只读，别直接改**
+- `模板/`：每一类怎么整理，可以改
+
+## 改记录：往 `.xiaoer/commands/` 放一个 .json
+
+文件名随意（按名字顺序执行，比如 `20261025-001.json`），内容是一条操作，或者一个操作数组。App 开着的话 30 秒内照着改，
+改完把原文件挪到 `.xiaoer/commands/done/`，旁边写 `<同名>.result.json`：每条 `{"ok": true/false, "message": "改了什么 / 为什么没改成"}`。
+
+`id` 用笔记开头属性里的 `id`（或索引 scenes 里的 id）。能做的：
+
+```json
+{"op": "category", "id": "段的id", "to": "听课讲座"}
+{"op": "edit", "id": "段的id", "title": "新标题", "event": "一句话事件", "place": "地点", "people": ["张三", "李四"]}
+{"op": "noise", "id": "段的id"}
+{"op": "merge", "id": "段的id"}
+{"op": "todo", "id": "段的id", "index": 0, "done": true}
+```
+
+- `category`：改类别。类别只能是：开会、我的分享、商务洽谈、现场调研、听课讲座、多人群聊、打电话、个人感悟、自言自语、生活日常、杂音。
+  改成「现场调研」可以带 `"subject": "调研对象"`。改完 App 会按新类别的模板重新整理这段笔记（要几十秒，用 App 里设好的模型）。
+- `edit`：改标题 / 事件 / 地点 / 人物，只写要改的几项。
+- `noise`：标成杂音，不再显示。`merge`：跟同一条录音里的上一段合成一段（重新整理）。
+- `todo`：第几条待办打勾（从 0 数，`"done": false` 取消；提醒加 `"kind": "reminders"`）。
+
+## 放一条录音进来
+
+往 `.xiaoer/inbox/` 放 `<名字>.json`（`{"start": "2026-10-25T14:00:00", "lines": [["14:00:05", "说的话"], …]}`，写完再改名成 .json）
+和同名的 `.m4a`（原声，可以没有）。App 收进来，跟录音卡上的一样切场景、按类别整理。
+''';

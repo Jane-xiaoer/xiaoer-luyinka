@@ -11,6 +11,7 @@ import 'bean/panel.dart';
 import 'bean/sync.dart';
 import 'bean/view.dart';
 import 'card/view.dart';
+import 'actions.dart';
 import 'ask.dart';
 import 'cards.dart';
 import 'drafts.dart';
@@ -1734,9 +1735,12 @@ class AskBoxState extends State<AskBox> {
     });
     _toBottom();
     _Msg answer;
+    var edits = <EditOp>[];
     try {
       final a = await Llm.instance!.chatMessages(messages, temperature: 0.5);
-      final (clean, ids) = parseFound(a);
+      final (found, ids) = parseFound(a);
+      final (clean, ops) = parseEdits(found);
+      edits = ops;
       answer = a.isEmpty
           ? const _Msg(false, '模型没回内容，再问一次试试。', error: true)
           : _Msg(false, clean.isEmpty && ids.isNotEmpty ? '找到这几段：' : clean, raw: a, found: ids, ask: q, focus: at);
@@ -1746,6 +1750,18 @@ class AskBoxState extends State<AskBox> {
     if (!mounted || gen != _gen) return;
     setState(() {
       _msgs.add(answer);
+      if (edits.isEmpty) _busy = false;
+    });
+    _toBottom();
+    if (edits.isEmpty) return;
+    // 小耳要动手改：照着改（改类别要按新模板重新整理，慢一点），改完把结果接在回答下面
+    final i = _msgs.length - 1;
+    setState(() => _msgs[i] = _Msg(false, '${answer.text}\n\n_正在改…_', raw: answer.raw, found: answer.found, ask: q, focus: at));
+    final results = await applyEdits(store, edits, Analyzer.of(store.lib, Llm.instance!).note);
+    if (!mounted || gen != _gen) return;
+    setState(() {
+      _msgs[i] = _Msg(false, '${answer.text}\n\n${results.map((r) => '- $r').join('\n')}',
+          raw: '${answer.raw}\n\n（App 的执行结果：${results.join('；')}）', found: answer.found, ask: q, focus: at);
       _busy = false;
     });
     _toBottom();
