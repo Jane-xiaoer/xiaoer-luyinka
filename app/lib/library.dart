@@ -291,6 +291,7 @@ String noteMd(Scene s) {
   if (s.place.isNotEmpty) b.writeln('- **地点**：${s.place}');
   if (s.people.isNotEmpty) b.writeln('- **人物**：${s.people.join('、')}');
   b.writeln('- **类别**：${catKey(s.category)}');
+  b.writeln('- **来源**：${sourceOf(s.stem)}');
   if (s.subject.isNotEmpty) b.writeln('- **调研对象**：${s.subject}');
   b.writeln('- **事件**：${s.event}');
   b.writeln('- **录音**：录音/${s.stem}.m4a，从 ${clockOf(s.offset)} 开始');

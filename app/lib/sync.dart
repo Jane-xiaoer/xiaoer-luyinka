@@ -140,7 +140,7 @@ class Syncer {
       if (e.status == 401) {
         // 云端不认这个登记（换了服务器 / 数据重置）：重新登记，没出结果的从头传
         store.settings['token'] = await cloud.register();
-        for (final r in store.recs.values.where((r) => r.stage == 'processing')) {
+        for (final r in store.recs.values.where((r) => r.stage == 'processing').toList()) {
           r
             ..stage = 'pulled'
             ..job = null;
@@ -194,6 +194,8 @@ class Syncer {
         ..lastSeen = DateTime.now();
       await c.syncTime();
       card.info = await c.info();
+      // 记下来：没连上也能在「录音卡」页看到上次的电量 / 存储
+      store.settings['cardInfo'] = [card.info!.battery, card.info!.freeKb, card.info!.totalKb, card.info!.version, DateTime.now().toIso8601String()];
       _changed();
       final files = await c.listFiles();
       for (final f in files) {
@@ -311,7 +313,7 @@ class Syncer {
   }
 
   Future<void> _upload() async {
-    for (final r in store.recs.values.where((r) => r.stage == 'pulled' || (r.stage == 'error' && r.job == null))) {
+    for (final r in store.recs.values.where((r) => r.stage == 'pulled' || (r.stage == 'error' && r.job == null)).toList()) {
       final f = store.raw(r.stem);
       if (!await f.exists()) continue;
       r.stage = 'uploading';
@@ -333,7 +335,7 @@ class Syncer {
   }
 
   Future<void> _collect() async {
-    for (final r in store.recs.values.where((r) => r.stage == 'processing' && r.job != null)) {
+    for (final r in store.recs.values.where((r) => r.stage == 'processing' && r.job != null).toList()) {
       final j = await cloud.job(r.job!);
       r.progress = (j['progress'] as num?)?.toInt() ?? r.progress;
       if (j['status'] == 'done') {
@@ -349,7 +351,11 @@ class Syncer {
         final raw = store.raw(r.stem);
         if (await raw.exists()) await raw.delete();
         r
-          ..stage = old || lines.isEmpty ? 'done' : 'transcribed'
+          ..stage = r.stem.startsWith('bean') && !old
+              ? 'review' // 录音豆的：先在录音豆页给用户看内容（没转出字也一样），导不导入由用户定
+              : old || lines.isEmpty
+                  ? 'done'
+                  : 'transcribed'
           ..job = null
           ..progress = 0
           ..error = null;

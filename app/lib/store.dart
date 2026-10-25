@@ -46,10 +46,19 @@ class Scene {
   String get dayKey => d['start'].toString().substring(0, 10);
 }
 
+/// 这条录音从哪来的（看名字前缀）：录音豆 / 现场会议 / 小耳语音 / 录音卡。
+String sourceOf(String stem) => stem.startsWith('bean')
+    ? '录音豆'
+    : stem.startsWith('live')
+        ? '现场会议'
+        : stem.startsWith('voice') || stem.startsWith('note')
+            ? '小耳语音'
+            : '录音卡';
+
 class Rec {
   String stem;
   int size;
-  String stage; // card 在卡上 · pulling 拉取中 · pulled 已拉 · uploading · processing 云端转写 · transcribed 待整理 · analyzing 整理中 · done · error
+  String stage; // card 在卡上 · pulling 拉取中 · pulled 已拉 · uploading · processing 云端转写 · review 待你决定（录音豆的：看过文字再决定搬不搬）· transcribed 待整理 · analyzing 整理中 · done · error
   int got = 0; // 已拉字节
   int progress = 0; // 云端进度 0–100
   String? job;
@@ -279,6 +288,7 @@ class Store extends ChangeNotifier {
 
   /// 一条录音的所有段（含杂音），整条拷贝逐字稿用。
   List<Scene> scenesOf(String stem) => [...?_scenes[stem]];
+  Iterable<String> get stems => _scenes.keys; // 资料里有的所有录音
 
   /// 所有场景（不含杂音），新的在前。
   List<Scene> get scenes {

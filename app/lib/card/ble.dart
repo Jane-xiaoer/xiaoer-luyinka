@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:universal_ble/universal_ble.dart';
 
+import '../ble_lock.dart';
 import 'client.dart';
 import 'protocol.dart';
 
@@ -24,7 +25,7 @@ class BleLink implements Link {
   BleLink._(this.device);
 
   /// 扫 [timeout]，列出附近所有的卡（信号强的在前）。给了 [until] 就扫到那张为止。
-  static Future<List<BleDevice>> scan({Duration timeout = const Duration(seconds: 6), String? until}) async {
+  static Future<List<BleDevice>> scan({Duration timeout = const Duration(seconds: 6), String? until}) => bleLock(() async {
     await UniversalBle.requestPermissions();
     final found = <String, BleDevice>{};
     final sub = UniversalBle.scanStream.listen((d) {
@@ -38,7 +39,7 @@ class BleLink implements Link {
     await UniversalBle.stopScan();
     await sub.cancel();
     return found.values.toList()..sort((a, b) => (b.rssi ?? -999).compareTo(a.rssi ?? -999));
-  }
+  });
 
   /// 只连 [id] 这一张；它不在旁边就返回 null，别人的卡一律不碰。
   static Future<BleLink?> find(String id) async {
@@ -69,19 +70,23 @@ class BleLink implements Link {
     for (final uuid in [chNotify, chKey]) {
       try {
         final c = await device.getCharacteristic(uuid, service: service);
-        _subs.add(c.onValueReceived.listen((v) {
-          for (final p in _parsers[uuid]!.feed(v)) {
-            _out.add(p);
-          }
-        }));
+        _subs.add(
+          c.onValueReceived.listen((v) {
+            for (final p in _parsers[uuid]!.feed(v)) {
+              _out.add(p);
+            }
+          }),
+        );
         await c.notifications.subscribe();
       } catch (_) {
         if (uuid == chNotify) rethrow; // 按键通道不是必需的
       }
     }
-    _subs.add(device.connectionStream.listen((ok) {
-      if (!ok && !_out.isClosed) _out.close();
-    }));
+    _subs.add(
+      device.connectionStream.listen((ok) {
+        if (!ok && !_out.isClosed) _out.close();
+      }),
+    );
   }
 
   @override

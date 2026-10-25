@@ -11,10 +11,11 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
+import 'dart:math' show sqrt;
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart' show rootBundle;
+import 'package:flutter/services.dart' show EventChannel, MethodChannel, PlatformException, rootBundle;
 import 'package:http/http.dart' as http;
 import 'package:record/record.dart';
 import 'package:sherpa_onnx/sherpa_onnx.dart' as so;
@@ -314,6 +315,71 @@ void _asrMain(List<Object> args) {
 
 enum LiveState { idle, preparing, recording, paused, saving }
 
+/// 麦克风和电脑声音对齐了再混：两路各自进来，节奏不一样（电脑声音一小块一小块、偶尔晚到），
+/// 来一块混一块的话晚到的那下就成了空白，人声被切碎、识别不出字（2026-10-25 实测）。
+/// 这里两路各攒着，取两边都有的那么长混出去；电脑声音停了（拖后超过 [maxLag]）就只出麦克风，
+/// 电脑声音攒太多（麦克风停了）就丢旧的，别越拖越晚。
+///
+/// 不戴耳机时对方的声音从扬声器出来、又被麦克风录一遍（晚几十到上百毫秒），两遍叠着识别会丢字串字。
+/// 所以电脑在出声（以及刚出完声的 [hang] 这么久）时把麦克风压低到 [duck]；你明显比回声响（同时说话）就不压。
+class AudioMixer {
+  final int maxLag;
+  static const _block = 320; // 20ms 一小段判断
+  static const hang = 16000 * 3 ~/ 10; // 电脑停声后还压 300ms（回声晚到）
+  static const duck = 0.12;
+  AudioMixer(this.maxLag);
+  Int16List _mic = Int16List(0), _sys = Int16List(0);
+  int _quiet = hang; // 电脑多久没出声了（采样数）
+  double _sysLevel = 0; // 最近电脑声音有多响（RMS，慢慢回落）
+
+  static double _rms(Int16List x, int from, int to) {
+    if (to <= from) return 0;
+    var e = 0.0;
+    for (var i = from; i < to; i++) {
+      e += x[i] * x[i];
+    }
+    return sqrt(e / (to - from));
+  }
+
+  static Int16List _cat(Int16List a, Int16List b) => Int16List(a.length + b.length)
+    ..setAll(0, a)
+    ..setAll(a.length, b);
+
+  void addSys(Int16List x) {
+    _sys = _cat(_sys, x);
+    if (_sys.length > _mic.length + maxLag * 2) _sys = Int16List.fromList(_sys.sublist(_sys.length - maxLag));
+  }
+
+  /// 放进一块麦克风，拿出能混好的那段（可能是空的：等电脑声音跟上）
+  Int16List addMic(Int16List x) {
+    _mic = _cat(_mic, x);
+    var n = _mic.length < _sys.length ? _mic.length : _sys.length;
+    if (_mic.length - n > maxLag) n = _mic.length; // 电脑声音断了：不等了，没有的地方当静音
+    final out = Int16List(n);
+    for (var b = 0; b < n; b += _block) {
+      final e = b + _block < n ? b + _block : n;
+      final sysE = _rms(_sys, b, e < _sys.length ? e : _sys.length);
+      final micE = _rms(_mic, b, e);
+      if (sysE > 300) {
+        _quiet = 0;
+        _sysLevel = sysE > _sysLevel ? sysE : _sysLevel;
+      } else {
+        _quiet += e - b;
+        _sysLevel *= 0.97;
+      }
+      // 电脑在出声 / 刚出完：麦克风多半是回声，压低；比回声响得多（你在说话）就不压
+      final g = _quiet < hang && micE < _sysLevel * 1.5 ? duck : 1.0;
+      for (var i = b; i < e; i++) {
+        final v = (_mic[i] * g).round() + (i < _sys.length ? _sys[i] : 0);
+        out[i] = v > 32767 ? 32767 : (v < -32768 ? -32768 : v);
+      }
+    }
+    _mic = Int16List.fromList(_mic.sublist(n));
+    _sys = n >= _sys.length ? Int16List(0) : Int16List.fromList(_sys.sublist(n));
+    return out;
+  }
+}
+
 class LiveSession extends ChangeNotifier {
   final Store store;
   final Directory appDir;
@@ -345,6 +411,50 @@ class LiveSession extends ChangeNotifier {
   AudioRecorder? _rec; // 第一次开录才建：没录过音的时候不碰麦克风插件
   AudioRecorder get _recorder => _rec ??= AudioRecorder();
   StreamSubscription<Uint8List>? _mic;
+
+  // ───────── 也录电脑声音（线上会议：腾讯会议 / 飞书 / Zoom…对方的声音）─────────
+  static const _sysCh = MethodChannel('luyinka/sysaudio');
+  static const _sysPcm = EventChannel('luyinka/sysaudio/pcm');
+  StreamSubscription? _sys;
+  AudioMixer? _mixer; // 开着「也录电脑声音」时：麦克风和电脑声音对齐了再混
+  String? sysWhat; // 正在录的是什么（「腾讯会议」/「电脑里的所有声音」），界面上显示
+  bool get withSystem => store.settings['liveSystemAudio'] == true;
+
+  /// 开 / 关「也录电脑声音」。正在录的时候马上生效。
+  Future<void> setWithSystem(bool v) async {
+    store.settings['liveSystemAudio'] = v;
+    await store.save();
+    if (state == LiveState.recording) v ? await _startSys() : await _stopSys();
+    notifyListeners();
+  }
+
+  Future<void> _startSys() async {
+    if (_sys != null || !Platform.isMacOS) return;
+    try {
+      final mixer = _mixer = AudioMixer(_rate * 3 ~/ 10);
+      _sys = _sysPcm.receiveBroadcastStream().listen((b) {
+        final x = b as Uint8List;
+        mixer.addSys(Int16List.view(Uint8List.fromList(x).buffer, 0, x.length ~/ 2));
+      });
+      sysWhat = await _sysCh.invokeMethod<String>('start');
+    } catch (e) {
+      await _stopSys();
+      status = e is PlatformException ? (e.message ?? '录不了电脑声音') : '录不了电脑声音：$e';
+    }
+    notifyListeners();
+  }
+
+  Future<void> _stopSys() async {
+    await _sys?.cancel();
+    _sys = null;
+    sysWhat = null;
+    _mixer = null;
+    if (Platform.isMacOS) {
+      try {
+        await _sysCh.invokeMethod('stop');
+      } catch (_) {}
+    }
+  }
   StreamSubscription<Amplitude>? _amp;
   IOSink? _pcm;
   int _samples = 0; // 已写进原声的样本数：VAD 的 start 是从这一轮开录算的，要加上它
@@ -492,6 +602,7 @@ class LiveSession extends ChangeNotifier {
       _heard = false;
       _odd = null;
       _mic = stream.listen(_onAudio);
+      if (withSystem) await _startSys();
       _silenceCheck?.cancel();
       _silenceCheck = Timer(const Duration(seconds: 4), () {
         if (state == LiveState.recording && !_heard) {
@@ -542,8 +653,15 @@ class LiveSession extends ChangeNotifier {
     }
     if (bytes.isEmpty) return;
     if (bytes.offsetInBytes.isOdd) bytes = Uint8List.fromList(bytes);
+    var pcm = Int16List.view(bytes.buffer, bytes.offsetInBytes, bytes.lengthInBytes ~/ 2);
+    final mixer = _mixer;
+    if (mixer != null) {
+      // 混进电脑声音（对方说的话）：存下来的原声和识别都是两边都有的
+      pcm = mixer.addMic(pcm);
+      if (pcm.isEmpty) return;
+      bytes = pcm.buffer.asUint8List();
+    }
     _pcm?.add(bytes);
-    final pcm = Int16List.view(bytes.buffer, bytes.offsetInBytes, bytes.lengthInBytes ~/ 2);
     _samples += pcm.length;
     final f = Float32List(pcm.length);
     for (var i = 0; i < pcm.length; i++) {
@@ -611,6 +729,7 @@ class LiveSession extends ChangeNotifier {
 
   Future<void> _stopMic() async {
     _silenceCheck?.cancel();
+    await _stopSys();
     await _mic?.cancel();
     await _amp?.cancel();
     _mic = null;
@@ -957,4 +1076,48 @@ Future<void> liveSelfTest(String wavPath, String outDir) async {
   File('${dir.path}/selftest.json').writeAsStringSync(const JsonEncoder.withIndent(' ').convert(result));
   say('完成 ok=${result['ok']}');
   await log.close();
+}
+
+/// 自检「也录电脑声音」：录 [secs] 秒电脑声音，麦克风当静音（每 100ms 一块），走 [AudioMixer] 混好存成 [wavPath]。
+Future<void> systemAudioSelfTest(int secs, String wavPath) async {
+  const ch = MethodChannel('luyinka/sysaudio');
+  const ev = EventChannel('luyinka/sysaudio/pcm');
+  final mixer = AudioMixer(_rate * 3 ~/ 10);
+  final out = BytesBuilder();
+  final sub = ev.receiveBroadcastStream().listen((b) {
+    final x = b as Uint8List;
+    mixer.addSys(Int16List.view(Uint8List.fromList(x).buffer, 0, x.length ~/ 2));
+  });
+  final what = await ch.invokeMethod<String>('start');
+  final mic = Timer.periodic(const Duration(milliseconds: 100), (_) {
+    out.add(mixer.addMic(Int16List(_rate ~/ 10)).buffer.asUint8List());
+  });
+  await Future.delayed(Duration(seconds: secs));
+  mic.cancel();
+  await sub.cancel();
+  await ch.invokeMethod('stop');
+  final pcm = out.takeBytes();
+  final h = ByteData(44);
+  void tag(int o, String s) {
+    for (var i = 0; i < 4; i++) {
+      h.setUint8(o + i, s.codeUnitAt(i));
+    }
+  }
+
+  tag(0, 'RIFF');
+  h.setUint32(4, 36 + pcm.length, Endian.little);
+  tag(8, 'WAVE');
+  tag(12, 'fmt ');
+  h
+    ..setUint32(16, 16, Endian.little)
+    ..setUint16(20, 1, Endian.little)
+    ..setUint16(22, 1, Endian.little)
+    ..setUint32(24, _rate, Endian.little)
+    ..setUint32(28, _rate * 2, Endian.little)
+    ..setUint16(32, 2, Endian.little)
+    ..setUint16(34, 16, Endian.little);
+  tag(36, 'data');
+  h.setUint32(40, pcm.length, Endian.little);
+  File(wavPath).writeAsBytesSync([...h.buffer.asUint8List(), ...pcm]);
+  stderr.writeln('录了 $what：${pcm.length ~/ 2 / _rate} 秒');
 }

@@ -7,6 +7,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'analyze.dart';
+import 'bean/panel.dart';
+import 'bean/sync.dart';
+import 'bean/view.dart';
+import 'card/view.dart';
 import 'ask.dart';
 import 'cards.dart';
 import 'drafts.dart';
@@ -31,7 +35,8 @@ class Home extends StatefulWidget {
   final Store store;
   final Syncer syncer;
   final LiveSession live;
-  const Home({super.key, required this.store, required this.syncer, required this.live});
+  final BeanSyncer? bean;
+  const Home({super.key, required this.store, required this.syncer, required this.live, this.bean});
   @override
   State<Home> createState() => _HomeState();
 }
@@ -39,12 +44,14 @@ class Home extends StatefulWidget {
 class _HomeState extends State<Home> {
   String? _day;
   String? _sceneId;
-  int _mode = 0; // 0 按天看 · 1 按类别看 · 2 按人看 · 3 待办 · 4 每周回顾 · 5 现场会议
+  int _mode = 0; // 0 按天看 · 1 按类别看 · 2 按人看 · 3 待办 · 4 每周回顾 · 5 现场会议 · 6 录音豆 · 7 录音卡
   bool get _byCat => _mode == 1;
   bool get _byPerson => _mode == 2;
   bool get _todos => _mode == 3;
   bool get _weeks => _mode == 4;
   bool get _live => _mode == 5;
+  bool get _beanMode => _mode == 6 && widget.bean != null;
+  bool get _cardMode => _mode == 7;
   String? _cat;
   String? _person;
   String? _week; // 每周回顾：选中的那周（2026-W42）
@@ -328,7 +335,7 @@ class _HomeState extends State<Home> {
                 store: store, syncer: widget.syncer, day: _todos ? null : day, onPick: pickDay,
                 mode: _mode, cat: cat, onPickCat: pickCat, onMode: setMode,
                 people: people, person: person, onPickPerson: pickPerson,
-                todoCount: openTodos, weeks: weeks, week: week?.key, onPickWeek: pickWeek, live: widget.live,
+                todoCount: openTodos, weeks: weeks, week: week?.key, onPickWeek: pickWeek, live: widget.live, bean: widget.bean,
                 search: SearchField(controller: _search, onChanged: _onSearch, onClear: clearSearch))),
         Expanded(child: Container(
           margin: const EdgeInsets.fromLTRB(0, 12, 12, 12),
@@ -340,6 +347,10 @@ class _HomeState extends State<Home> {
           ),
           child: _live && !searching
               ? LiveView(live: widget.live, top: 24)
+              : _beanMode && !searching
+              ? BeanView(bean: widget.bean!, store: store, onOpen: openFound, top: 24)
+              : _cardMode && !searching
+              ? CardView(syncer: widget.syncer, store: store, onOpen: openFound, top: 24)
               : Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         SizedBox(
           width: (MediaQuery.sizeOf(context).width * 0.36).clamp(360, 470).toDouble(),
@@ -400,9 +411,22 @@ class _HomeState extends State<Home> {
               Padding(
                 padding: const EdgeInsets.only(right: 10, top: 6, bottom: 6),
                 child: ChoiceChip(
+                    avatar: const Icon(Icons.sd_card_outlined, size: 16), label: const Text('录音卡'),
+                    selected: _cardMode, onSelected: (_) => setMode(7)),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(right: 10, top: 6, bottom: 6),
+                child: ChoiceChip(
                     avatar: const Icon(Icons.mic_none_rounded, size: 16), label: const Text('现场会议'),
                     selected: _live, onSelected: (_) => setMode(5)),
               ),
+              if (widget.bean != null)
+                Padding(
+                  padding: const EdgeInsets.only(right: 10, top: 6, bottom: 6),
+                  child: ChoiceChip(
+                      avatar: const Icon(Icons.graphic_eq_rounded, size: 16), label: const Text('录音豆'),
+                      selected: _beanMode, onSelected: (_) => setMode(6)),
+                ),
               if (store.days.isNotEmpty) ...[
               Padding(
                 padding: const EdgeInsets.only(right: 10, top: 6, bottom: 6),
@@ -454,6 +478,10 @@ class _HomeState extends State<Home> {
         Expanded(
           child: _live && !searching
               ? LiveView(live: widget.live)
+              : _beanMode && !searching
+              ? BeanView(bean: widget.bean!, store: store, onOpen: openFound)
+              : _cardMode && !searching
+              ? CardView(syncer: widget.syncer, store: store, onOpen: openFound)
               : searching
               ? SearchColumn(store: store, hits: hits, scenes: scenes, topic: topic, selected: null,
                   draftHits: draftHits, onPickDraft: _openNarrowDraft,
@@ -501,6 +529,32 @@ class _HomeState extends State<Home> {
           )));
 }
 
+/// 这条从哪来的：录音卡 / 录音豆 / 现场会议 / 小耳语音（小图标 + 字，不抢类别的颜色）。
+class SourceTag extends StatelessWidget {
+  final String stem;
+  const SourceTag(this.stem, {super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final s = sourceOf(stem);
+    final icon = switch (s) {
+      '录音豆' => Icons.graphic_eq_rounded,
+      '现场会议' => Icons.mic_none_rounded,
+      '小耳语音' => Icons.record_voice_over_outlined,
+      _ => Icons.sd_card_outlined,
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1),
+      decoration: BoxDecoration(border: Border.all(color: K.line), borderRadius: BorderRadius.circular(99)),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(icon, size: 12, color: K.faint),
+        const SizedBox(width: 3),
+        Text(s, style: const TextStyle(fontSize: 11.5, color: K.faint)),
+      ]),
+    );
+  }
+}
+
 // ───────── 卡的状态（左栏卡片 / 手机顶栏共用）─────────
 
 /// (标题, 一行状态)
@@ -508,7 +562,7 @@ class _HomeState extends State<Home> {
   final c = syncer.card;
   final title = syncer.boundId == null ? '录音卡' : syncer.boundName;
   final pend = store.pending;
-  final pulling = pend.where((r) => r.stage == 'pulling').toList();
+  final pulling = pend.where((r) => r.stage == 'pulling' && !r.stem.startsWith('bean')).toList(); // 录音豆的进度在它自己的面板
   if (pulling.isNotEmpty) return (title, pullLine(pulling.first));
   final processing = pend.where((r) => r.stage == 'processing').toList();
   if (processing.isNotEmpty) {
@@ -607,11 +661,12 @@ class Sidebar extends StatelessWidget {
   final String? week;
   final void Function(String)? onPickWeek;
   final LiveSession? live;
+  final BeanSyncer? bean;
   const Sidebar(
       {super.key, required this.store, required this.syncer, required this.day, required this.onPick,
       required this.mode, required this.cat, required this.onPickCat, required this.onMode,
       required this.people, required this.person, required this.onPickPerson, this.search,
-      this.todoCount = 0, this.weeks = const [], this.week, this.onPickWeek, this.live});
+      this.todoCount = 0, this.weeks = const [], this.week, this.onPickWeek, this.live, this.bean});
 
   @override
   Widget build(BuildContext context) => Container(
@@ -633,6 +688,13 @@ class Sidebar extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
             child: Column(children: [
+              NavRow(icon: Icons.sd_card_outlined, text: '录音卡', selected: mode == 7, onTap: () => onMode(7),
+                  trailing: syncer.card.connected || store.pending.any((r) => sourceOf(r.stem) == '录音卡')
+                      ? Container(width: 8, height: 8, decoration: const BoxDecoration(color: K.live, shape: BoxShape.circle))
+                      : null),
+              if (bean != null)
+                NavRow(icon: Icons.graphic_eq_rounded, text: '录音豆', selected: mode == 6, onTap: () => onMode(6),
+                    trailing: BeanDot(bean: bean!)),
               NavRow(icon: Icons.mic_none_rounded, text: '现场会议', selected: mode == 5, onTap: () => onMode(5),
                   trailing: live == null ? null : LiveDot(live: live!)),
               NavRow(icon: Icons.checklist_rounded, text: '待办', count: todoCount, selected: mode == 3, onTap: () => onMode(3)),
@@ -1293,6 +1355,7 @@ class SceneRow extends StatelessWidget {
                     Wrap(spacing: 8, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
                       Text(scene.title, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
                       Chip2(scene.category),
+                      SourceTag(scene.stem),
                       if (scene.todo > 0) Chip2('${scene.todo} 件要办', todo: true),
                     ]),
                     const SizedBox(height: 4),
@@ -1680,6 +1743,7 @@ class FoundCard extends StatelessWidget {
                       style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: K.accent,
                           fontFeatures: [FontFeature.tabularFigures()])),
                   Chip2(s.category),
+                  SourceTag(s.stem),
                   Text(s.title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: K.ink)),
                 ]),
                 if (s.event.isNotEmpty) ...[
@@ -1843,6 +1907,7 @@ class _SceneDetailState extends State<SceneDetail> {
     final header = <Widget>[
       Wrap(spacing: 14, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
         CategoryChip(scene: s, store: store),
+        SourceTag(s.stem),
         meta(Icons.schedule, '${hm(s.start)}–${hm(s.end)} · ${duration(s.end.difference(s.start))}'),
         if (s.place.isNotEmpty) meta(Icons.place_outlined, s.place),
         if (s.people.isNotEmpty) meta(Icons.people_outline, s.people.join('、')),

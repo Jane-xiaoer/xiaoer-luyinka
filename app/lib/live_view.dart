@@ -1,6 +1,8 @@
 // 现场会议的界面：左边实时原话，右边我的笔记，底下「顺一下」。
 // 宽屏左右两栏；手机上下两块（原话在上、笔记在下）。
 // 原话进笔记：点一句 = 整句进去；选中一段 →「记到笔记」。进去的只有文字，不带时间（Jane 定的）。
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -448,6 +450,8 @@ class _LiveViewState extends State<LiveView> {
                 textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
               ),
             ),
+            const SizedBox(height: 12),
+            _systemChip(),
             if (live.status != null) ...[const SizedBox(height: 14), _statusText()],
             const SizedBox(height: 10),
             TextButton.icon(
@@ -460,6 +464,52 @@ class _LiveViewState extends State<LiveView> {
       ),
     ),
   );
+
+  /// 「也录电脑声音」：开线上会议（腾讯会议 / 飞书 / Zoom…）时把对方的声音也录进来
+  Widget _systemChip() {
+    if (!Platform.isMacOS) return const SizedBox();
+    final on = live.withSystem;
+    final busy = live.state == LiveState.preparing || live.state == LiveState.saving;
+    return Tooltip(
+      message: '开线上会议时打开：把电脑里放出来的声音（腾讯会议、飞书、Zoom 里对方说的话）也录进来。\n'
+          '外放的话对方的声音会被麦克风再录一遍，戴耳机效果最好。',
+      child: InkWell(
+        borderRadius: BorderRadius.circular(99),
+        onTap: busy ? null : () => live.setWithSystem(!on),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(6, 2, 14, 2),
+          decoration: BoxDecoration(
+            color: on ? K.live.withValues(alpha: 0.12) : Colors.transparent,
+            borderRadius: BorderRadius.circular(99),
+            border: Border.all(color: on ? K.live : K.lineStrong),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Transform.scale(
+                scale: 0.75,
+                child: Switch(
+                  value: on,
+                  activeTrackColor: K.live,
+                  onChanged: busy ? null : live.setWithSystem,
+                ),
+              ),
+              Icon(Icons.laptop_mac_rounded, size: 16, color: on ? K.live : K.mute),
+              const SizedBox(width: 6),
+              Text(
+                on ? '电脑声音：开着（对方说话也会出字）' : '电脑声音：关着（开线上会议时打开）',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: on ? K.live : K.mute,
+                  fontWeight: on ? FontWeight.w700 : FontWeight.w400,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
   Widget _statusText() => Text(
     live.status!,
@@ -518,6 +568,7 @@ class _LiveViewState extends State<LiveView> {
           style: FilledButton.styleFrom(backgroundColor: K.accent),
           child: const Text('结束，收进录音卡'),
         ),
+        _systemChip(),
         if (live.state == LiveState.paused)
           TextButton(
             onPressed: _discard,

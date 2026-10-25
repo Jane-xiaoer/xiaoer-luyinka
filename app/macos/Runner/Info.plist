@@ -39,6 +39,8 @@
 	<string>$(PRODUCT_COPYRIGHT)</string>
 	<key>NSMainNibFile</key>
 	<string>MainMenu</string>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>开线上会议时（腾讯会议、飞书、Zoom 等），把对方的声音也录进现场会议，边听边出原话。识别在这台电脑上完成，声音不上传。</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>现场会议要用麦克风，边听边出原话。识别在这台电脑上完成，声音不上传。</string>
 	<key>NSPrincipalClass</key>
