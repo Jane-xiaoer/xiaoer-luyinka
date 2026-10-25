@@ -92,7 +92,10 @@ void main() {
   setUp(() async => tmp = await Directory.systemTemp.createTemp('stream'));
   tearDown(() async {
     for (final s in stores) {
-      await s.save(); // 同步那边存盘是排队异步的，等它写完再删临时目录
+      // 同步那边存盘是排队异步的，等它写完再删临时目录。
+      // 「重启前」「重启后」两个 Store 同时开在一个文件夹上、各排各的队，会抢同一个 state.json.tmp
+      // （真 App 只有一个 Store，不会这样）：这里抢输了的那次改名不算测试失败。
+      await s.save().catchError((_) {}, test: (e) => e is PathNotFoundException);
     }
     stores.clear();
     await tmp.delete(recursive: true);
