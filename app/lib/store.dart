@@ -176,6 +176,16 @@ class Store extends ChangeNotifier {
     return f.existsSync() ? Map<String, dynamic>.from(jsonDecode(f.readAsStringSync())) : null;
   }
 
+  /// 界面上用：读不出来（文件被 iCloud 挪到云上、读到一半坏了）就当没有，不抛错（画页面时抛错整页就灰了）。
+  /// 流程里别用它：「没有索引」在流程里意思是做完了，读不出 ≠ 没有。
+  Map<String, dynamic>? peekResult(String stem) {
+    try {
+      return readResult(stem);
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// 存一条录音的结果：索引 + 每段的笔记文件 + 那几天的时间线。
   /// 重新切分 / 合并后不在了的段：笔记文件删掉，调研对象文件和观点库里它那块拿掉。
   Future<void> putResult(String stem, Map<String, dynamic> res) async {

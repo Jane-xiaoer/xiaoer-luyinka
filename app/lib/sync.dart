@@ -118,7 +118,7 @@ class Syncer {
     // 旧版整理的（还没按类别模板写笔记）：排进「待整理」，升级后自动按新模板重整一遍
     for (final r in store.recs.values.where((r) => r.stage == 'done')) {
       r.progress = 0; // 旧版做完了进度还停在半截
-      final res = store.readResult(r.stem);
+      final res = store.peekResult(r.stem); // 读不出（在云上）就先不管，别让整个同步起不来
       final sc = res?['scenes'] as List?;
       if (sc != null && sc.isNotEmpty && sc.every((x) => x is Map && !x.containsKey('body')) && (res?['lines'] as List?)?.isNotEmpty == true) {
         r.stage = 'transcribed';
@@ -418,7 +418,13 @@ class Syncer {
   Future<void> _analyze() async {
     final now = DateTime.now().millisecondsSinceEpoch;
     for (final r in store.recs.values.where((r) => r.stage == 'transcribed' && now - r.tried > 180000).toList()) {
-      final res = store.readResult(r.stem);
+      final Map<String, dynamic>? res;
+      try {
+        res = store.readResult(r.stem);
+      } catch (_) {
+        r.tried = now; // 索引读不出来（被 iCloud 挪到云上了）：过一会儿再试，别当成做完了
+        continue;
+      }
       if (res == null) {
         r.stage = 'done';
         continue;

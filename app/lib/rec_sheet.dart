@@ -58,7 +58,7 @@ String recDuration(int s) {
 
 /// 这条转写出来的文字：[[钟点, 文字], …]（还没转写就是空的）
 List<List<String>> recLines(Store store, String stem) => [
-  for (final x in (store.readResult(stem)?['lines'] as List? ?? const []))
+  for (final x in (store.peekResult(stem)?['lines'] as List? ?? const []))
     List<String>.from(x),
 ];
 
@@ -103,7 +103,7 @@ class _RecSheetState extends State<RecSheet> {
       return p[0] * 3600 + p[1] * 60 + (p.length > 2 ? p[2] : 0);
     }
 
-    final start = (widget.store.readResult(widget.stem)?['start'] ?? '')
+    final start = (widget.store.peekResult(widget.stem)?['start'] ?? '')
         .toString();
     if (start.length < 19) return 0;
     try {

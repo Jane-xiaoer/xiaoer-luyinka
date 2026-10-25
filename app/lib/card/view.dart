@@ -16,7 +16,7 @@ DateTime cardStemTime(Store store, String stem) {
   final m = RegExp(r'^(\d{4}-\d{2}-\d{2}) (\d{2})\.(\d{2})\.(\d{2})')
       .firstMatch(stem);
   if (m != null) return DateTime.parse('${m[1]}T${m[2]}:${m[3]}:${m[4]}');
-  final s = (store.readResult(stem)?['start'] ?? '').toString();
+  final s = (store.peekResult(stem)?['start'] ?? '').toString();
   return DateTime.tryParse(s.length >= 19 ? s.substring(0, 19) : s) ??
       DateTime(2000);
 }
@@ -45,9 +45,9 @@ class _CardViewState extends State<CardView> {
 
   /// 多长（秒）：转写好了按云端给的，没转写按卡上的大小（每秒 2000 字节）
   int _seconds(Rec r) =>
-      (store.readResult(r.stem)?['seconds'] as num?)?.round() ?? r.size ~/ 2000;
+      (store.peekResult(r.stem)?['seconds'] as num?)?.round() ?? r.size ~/ 2000;
 
-  bool _hasText(Rec r) => store.readResult(r.stem) != null;
+  bool _hasText(Rec r) => store.peekResult(r.stem) != null;
   bool _onCard(Rec r) => !r.deletedOnCard;
   String _kind(Rec r) => r.stage == 'done'
       ? '已导入'

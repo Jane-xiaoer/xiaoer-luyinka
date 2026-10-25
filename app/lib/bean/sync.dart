@@ -95,12 +95,12 @@ class BeanSyncer extends ChangeNotifier {
             st == 'transcribed' ||
             st == 'analyzing' ||
             st == 'done') &&
-        store.readResult(f.stem) != null;
+        store.peekResult(f.stem) != null;
   }
 
   /// 转写出来的文字（点「看看」时显示）：[[钟点, 文字], …]
   List<List<String>> lines(BeanFile f) => [
-    for (final x in (store.readResult(f.stem)?['lines'] as List? ?? const []))
+    for (final x in (store.peekResult(f.stem)?['lines'] as List? ?? const []))
       List<String>.from(x),
   ];
 
