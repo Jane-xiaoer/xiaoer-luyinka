@@ -2,7 +2,9 @@
 // 这时同步照样起得来，页面照样画得出，读不出的那条先跳过、不当成做完了。（用读不了的文件模拟）
 import 'dart:io';
 
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:luyinka/card/view.dart';
 import 'package:luyinka/cloud.dart';
 import 'package:luyinka/library.dart';
 import 'package:luyinka/store.dart';
@@ -36,5 +38,30 @@ void main() {
     await store.save(); // 后台的保存先等它落盘，再收拾
     await Future.delayed(const Duration(milliseconds: 200));
     await tmp.delete(recursive: true);
+  });
+
+  testWidgets('录音卡页：有一条索引读不出来也画得出，那条照样列着', (tester) async {
+    final tmp = Directory.systemTemp.createTempSync('unread2');
+    final lib = Library(Directory('${tmp.path}/资料'));
+    await tester.runAsync(() async {
+      await lib.ensure();
+      await Directory('${tmp.path}/app/raw').create(recursive: true);
+    });
+    final store = Store(Directory('${tmp.path}/app'))..lib = lib;
+    await tester.runAsync(() async {
+      await store.putResult('2026-10-18 07.40.00', {'start': '2026-10-18T07:40:00', 'seconds': 60, 'lines': [['07:40:00', '你好']], 'scenes': []});
+      await Process.run('chmod', ['000', store.result('2026-10-18 07.40.00').path]);
+    });
+    store.recs['2026-10-18 07.40.00'] = Rec('2026-10-18 07.40.00', 120000, 'done');
+    final syncer = Syncer(store, Cloud('http://127.0.0.1:9', token: 't'), (_) async => null, () async => [], () => 'Asia/Shanghai');
+    tester.view.physicalSize = const Size(1400, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: CardView(syncer: syncer, store: store, onOpen: (_) {}))));
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    expect(find.text('卡上来的录音'), findsOneWidget);
+    expect(find.textContaining('2026-10-18 07:40'), findsOneWidget);
+    await tester.runAsync(() => Process.run('chmod', ['644', store.result('2026-10-18 07.40.00').path]));
   });
 }
