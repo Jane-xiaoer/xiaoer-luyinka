@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'bean/sync.dart';
@@ -35,6 +37,14 @@ Future<void> main() async {
   await dir.create(recursive: true);
   final store = Store(dir);
   await store.load();
+  // 资料文件夹在 iCloud 上、有文件被挪到云上了：请系统在后台下载回来，下回来了再读一遍
+  if (Platform.isMacOS) {
+    const files = MethodChannel('luyinka/files');
+    files.invokeMethod('download', store.lib.path).catchError((_) {});
+    Timer.periodic(const Duration(minutes: 1), (_) {
+      if (store.unreadable > 0) store.reload();
+    });
+  }
   final cloud = Cloud((store.settings['cloud'] as String?) ?? defaultCloud, token: store.settings['token'] as String?);
   final syncer = Syncer(
     store,

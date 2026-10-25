@@ -53,16 +53,25 @@ class Library {
     for (final d in ['.xiaoer', '录音', '逐字稿', '每日', '每周', '模板', '成稿']) {
       await Directory('$path/$d').create(recursive: true);
     }
+    // 读不出来的（文稿开了 iCloud、被挪到云上了）先不管：读失败就当用户改过，不覆盖
+    Future<String?> read(File f) async {
+      try {
+        return (await f.readAsString()).trim();
+      } catch (_) {
+        return null;
+      }
+    }
+
     for (final e in defaultTemplates.entries) {
       final f = templateFile(e.key);
-      if (!await f.exists() || (legacyTemplates[e.key] ?? const []).contains((await f.readAsString()).trim())) {
+      if (!await f.exists() || (legacyTemplates[e.key] ?? const []).contains(await read(f))) {
         await f.writeAsString('${e.value}\n');
       }
     }
     if (!await quickActionsFile.exists()) await quickActionsFile.writeAsString(quickActionsMd(quickActions));
     if (!await styleFile.exists()) await styleFile.writeAsString(defaultStyle);
     if (!await vocabFile.exists()) await vocabFile.writeAsString(defaultVocab);
-    if (!await polishFile.exists() || legacyPolish.map((x) => x.trim()).contains((await polishFile.readAsString()).trim())) {
+    if (!await polishFile.exists() || legacyPolish.map((x) => x.trim()).contains(await read(polishFile))) {
       await polishFile.writeAsString(defaultPolish); // 没改过的旧默认换成新的
     }
     final readme = File('$path/说明.md');

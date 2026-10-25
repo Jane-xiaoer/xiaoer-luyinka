@@ -18,6 +18,22 @@ class MainFlutterWindow: NSWindow {
 
     RegisterGeneratedPlugins(registry: flutterViewController)
     SysAudio.shared.register(flutterViewController.engine.binaryMessenger)
+    FlutterMethodChannel(name: "luyinka/files", binaryMessenger: flutterViewController.engine.binaryMessenger)
+      .setMethodCallHandler { call, result in
+        guard call.method == "download", let path = call.arguments as? String else { return result(FlutterMethodNotImplemented) }
+        // 资料文件夹里被挪到云上的文件：请 iCloud 在后台下载回来（不等它下完）
+        DispatchQueue.global(qos: .utility).async {
+          let fm = FileManager.default
+          var n = 0
+          if let e = fm.enumerator(at: URL(fileURLWithPath: path), includingPropertiesForKeys: [.ubiquitousItemDownloadingStatusKey]) {
+            for case let url as URL in e {
+              let st = (try? url.resourceValues(forKeys: [.ubiquitousItemDownloadingStatusKey]))?.ubiquitousItemDownloadingStatus
+              if st == .notDownloaded, (try? fm.startDownloadingUbiquitousItem(at: url)) != nil { n += 1 }
+            }
+          }
+          DispatchQueue.main.async { result(n) }
+        }
+      }
 
     super.awakeFromNib()
   }

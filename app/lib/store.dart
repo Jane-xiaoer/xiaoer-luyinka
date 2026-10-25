@@ -128,16 +128,23 @@ class Store extends ChangeNotifier {
   Future<void> reload() async {
     _scenes.clear();
     _drafts = null;
+    var miss = 0;
     final d = Directory('${lib.path}/.xiaoer');
     if (await d.exists()) {
       for (final f in d.listSync().whereType<File>().where((f) => f.path.endsWith('.json'))) {
         try {
           await _loadScenes(f.uri.pathSegments.last.replaceAll(RegExp(r'\.json$'), ''));
-        } catch (_) {}
+        } catch (_) {
+          miss++; // 多半是被 iCloud 挪到云上了（Mac 上读这种文件直接报错、不干等），下回来再读
+        }
       }
     }
+    unreadable = miss;
     notifyListeners();
   }
+
+  /// 上次 [reload] 有几条没读出来（文稿开了 iCloud「优化存储」、文件被挪到云上）。大于 0 时隔一会儿再读。
+  int unreadable = 0;
 
   Future<void> moveLibrary(String path) async {
     settings['library'] = path;
@@ -318,7 +325,7 @@ class Store extends ChangeNotifier {
   }
 
   /// 正在路上的（还没出结果的）。
-  List<Rec> get pending => recs.values.where((r) => r.stage != 'done').toList();
+  List<Rec> get pending => recs.values.where((r) => r.stage != 'done' && r.stage != 'review').toList(); // 待你决定的不算在处理
 
   /// 类别 → 这一类的场景（新的在前），按 cats 的顺序，没有的类别不出现。
   Map<String, List<Scene>> get byCategory {
