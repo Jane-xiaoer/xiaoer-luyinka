@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -23,7 +24,14 @@ Future<void> main() async {
   final selftest = Platform.environment['LUYINKA_LIVE_SELFTEST'];
   if (selftest != null && selftest.contains('|')) {
     final [wav, out] = selftest.split('|');
-    await liveSelfTest(wav, out);
+    Cloud? cloud;
+    if (Platform.environment['LUYINKA_SELFTEST_CLOUD'] == '1') {
+      // 用云端识别自检：拿本机 App 登记过的云端身份
+      final st = File('${(await getApplicationSupportDirectory()).path}/luyinka/state.json');
+      final s = (jsonDecode(await st.readAsString()) as Map)['settings'] as Map;
+      cloud = Cloud((s['cloud'] as String?) ?? defaultCloud, token: s['token'] as String?);
+    }
+    await liveSelfTest(wav, out, cloud: cloud);
     exit(0);
   }
   // 自检「也录电脑声音」（不开界面）：录 N 秒电脑声音，走跟现场会议一样的混音，存成 wav：LUYINKA_SYS_SELFTEST="<秒>|<wav>"

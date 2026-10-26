@@ -197,15 +197,33 @@ def _result(token: str, d: Path, meta: dict, ogg: Path, segs_of) -> None:
 
 def _segments(ogg: Path, prog=None) -> list:
     """转写成带秒数的句子（模型常驻在 pipeline._transcriber，第一条之后不再加载）。"""
-    from luyinka.transcribe import Transcriber
-
     with tempfile.TemporaryDirectory() as td:
         wav = Path(td) / "a.wav"
         pipeline.to_wav(ogg, wav)
+        return _locked_segments(wav, prog)
+
+
+def _transcriber():
+    from luyinka.transcribe import Transcriber
+    if pipeline._transcriber is None:
+        pipeline._transcriber = Transcriber()
+    return pipeline._transcriber
+
+
+def _locked_segments(wav: Path, prog=None) -> list:
+    """整条录音转写：一句一句地占用模型，每转完一句就让出来、让现场会议的句子先插队。
+    以前整条一直占着（长录音几分钟），这期间现场会议送来的句子只能干等，实时出字就卡住了。"""
+    with ASR_LOCK:
+        it = _transcriber().segments(wav, prog)
+    out = []
+    while True:
+        while _WAITING[0]:  # 有现场会议的句子在等：先让它
+            time.sleep(0.01)
         with ASR_LOCK:
-            if pipeline._transcriber is None:
-                pipeline._transcriber = Transcriber()
-            return list(pipeline._transcriber.segments(wav, prog))
+            seg = next(it, None)
+        if seg is None:
+            return out
+        out.append(seg)
 
 
 # ───────── 边拉边传：一段一段收、一段一段转，传完接起来 ─────────
@@ -286,21 +304,24 @@ def finish_stream(token: str, dev: str, rid: str) -> None:
 
 
 ASR_LOCK = threading.Lock()   # 常驻的转写模型：后台整理录音和 /v1/transcribe 共用，一次只让一个用
+_WAITING = [0]                # 正在等模型的「一句话」请求数（现场会议实时出字）：后台整理录音看到它就先让
+_WAIT = threading.Lock()
 MAX_SNIPPET = 10 * 1024 * 1024  # 一句话最多 5 分钟多一点（16k×2 字节/秒）
 
 
 def transcribe_snippet(pcm: bytes) -> str:
-    """一小段裸 PCM → 文字。小耳经纪人边说边转时一段一段送上来，拼接和纠错在她本机做。"""
+    """一小段裸 PCM → 文字（小耳经纪人边说边转、现场会议用云端识别时一句一句送上来）。比后台整理录音优先。"""
     import wave
-    from luyinka.transcribe import Transcriber
     with tempfile.TemporaryDirectory() as td:
         wav = Path(td) / "s.wav"
         with wave.open(str(wav), "wb") as w:
             w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000); w.writeframes(pcm)
+        with _WAIT:
+            _WAITING[0] += 1
         with ASR_LOCK:
-            if pipeline._transcriber is None:
-                pipeline._transcriber = Transcriber()
-            segs = list(pipeline._transcriber.segments(wav))
+            with _WAIT:
+                _WAITING[0] -= 1
+            segs = list(_transcriber().segments(wav))
     return "".join(s.text for s in segs).strip()
 
 

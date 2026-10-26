@@ -37,6 +37,14 @@ class Cloud {
     return token!;
   }
 
+  /// 一句话（16k 单声道 16 位裸 PCM）→ 文字。现场会议用云端识别时一句一句送（比后台整理录音优先）。
+  Future<String> transcribe(Uint8List pcm) async {
+    final d = await _json(await http
+        .post(Uri.parse('$base/v1/transcribe'), headers: {..._auth, 'Content-Type': 'application/octet-stream'}, body: pcm)
+        .timeout(const Duration(seconds: 30)));
+    return (d['text'] ?? '').toString();
+  }
+
   /// 卡上原文件 → 任务 id。
   Future<String> upload(String name, Uint8List raw, String tz) async {
     final uri = Uri.parse('$base/v1/recordings').replace(queryParameters: {'name': name, 'tz': tz, 'asr': '1'});

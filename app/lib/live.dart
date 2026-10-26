@@ -21,6 +21,7 @@ import 'package:record/record.dart';
 import 'package:sherpa_onnx/sherpa_onnx.dart' as so;
 
 import 'analyze.dart' show Chat;
+import 'cloud.dart';
 import 'llm.dart';
 import 'store.dart';
 import 'templates.dart' show VocabEntry, fixWords, plainNotes;
@@ -81,7 +82,8 @@ LiveLine? joinLines(LiveLine prev, LiveLine next, String? Function(Float32List) 
   // 例外：太短算不出声纹的小碎片（「可。」「这个。」），紧跟着就接上——就算偶尔是别人插的一句「对」，接错代价也小。
   final sameNamed = prev.speaker != null && prev.speaker == next.speaker;
   final sameVoice = prev.emb != null && next.emb != null && Voices.cosine(prev.emb!, next.emb!) >= _joinMin;
-  final crumb = next.emb == null && next.text.length <= 6 && next.at.difference(prev.end!) <= const Duration(seconds: 1);
+  final crumb =
+      next.emb == null && next.text.length <= 6 && next.at.difference(prev.end!) <= const Duration(seconds: 1);
   if (!sameNamed && !sameVoice && !crumb) return null;
   if (!prev.auto && prev.speaker == null && next.speaker != null) return null; // 你说过「不知道是谁」的那句，别把认出来的人并进去
   // 声纹按时长加权平均（余弦只看方向，不用归一化）
@@ -151,14 +153,18 @@ class LiveModels {
     };
   }
 
-  Future<void> ensure(void Function(String what, double? frac) progress) async {
+  /// 切句模型随 App 带着（assets/models/），拷出来给原生库读。云端识别也要它（本机切句、每句送云端）。
+  Future<void> ensureVad() async {
     await File('${model.parent.path}/.keep').create(recursive: true);
     if (!await vad.exists()) {
-      // 切句模型随 App 带着（assets/models/），拷出来给原生库读
       final b = await rootBundle.load('assets/models/silero_vad.onnx');
       await File('${vad.path}.part').writeAsBytes(b.buffer.asUint8List(b.offsetInBytes, b.lengthInBytes));
       await File('${vad.path}.part').rename(vad.path);
     }
+  }
+
+  Future<void> ensure(void Function(String what, double? frac) progress) async {
+    await ensureVad();
     for (final (f, urls) in [
       (tokens, ['https://huggingface.co/$_hf/tokens.txt', 'https://hf-mirror.com/$_hf/tokens.txt']),
       (model, ['https://huggingface.co/$_hf/model.int8.onnx', 'https://hf-mirror.com/$_hf/model.int8.onnx']),
@@ -230,19 +236,28 @@ void _asrMain(List<Object> args) {
     ),
     bufferSizeInSeconds: 60,
   );
-  final rec = so.OfflineRecognizer(
-    so.OfflineRecognizerConfig(
-      model: so.OfflineModelConfig(
-        senseVoice: so.OfflineSenseVoiceModelConfig(model: paths[0], language: 'zh', useInverseTextNormalization: true),
-        tokens: paths[1],
-        numThreads: int.parse(paths[3]),
-        debug: false,
-      ),
-    ),
-  );
+  // 没给识别模型（paths[0] 空）= 用云端识别：这里只切句，每句的声音送回主线程去云端转
+  final rec = paths[0].isEmpty
+      ? null
+      : so.OfflineRecognizer(
+          so.OfflineRecognizerConfig(
+            model: so.OfflineModelConfig(
+              senseVoice: so.OfflineSenseVoiceModelConfig(
+                model: paths[0],
+                language: 'zh',
+                useInverseTextNormalization: true,
+              ),
+              tokens: paths[1],
+              numThreads: int.parse(paths[3]),
+              debug: false,
+            ),
+          ),
+        );
   final spk = paths[4].isEmpty
       ? null
-      : so.SpeakerEmbeddingExtractor(config: so.SpeakerEmbeddingExtractorConfig(model: paths[4], numThreads: 1, debug: false));
+      : so.SpeakerEmbeddingExtractor(
+          config: so.SpeakerEmbeddingExtractorConfig(model: paths[4], numThreads: 1, debug: false),
+        );
   var pending = Float32List(0);
 
   /// 这一句的声纹：不到 0.8 秒的（嗯、对、好的）认不准，不算
@@ -274,6 +289,19 @@ void _asrMain(List<Object> args) {
       final bounds = [0, ...cuts, seg.samples.length];
       for (var i = 0; i + 1 < bounds.length; i++) {
         final part = Float32List.sublistView(seg.samples, bounds[i], bounds[i + 1]);
+        if (rec == null) {
+          final pcm = Int16List(part.length);
+          for (var k = 0; k < part.length; k++) {
+            pcm[k] = (part[k].clamp(-1.0, 1.0) * 32767).round();
+          }
+          out.send({
+            'start': seg.start + bounds[i],
+            'len': part.length,
+            'pcm': pcm.buffer.asUint8List(),
+            'emb': voiceOf(part),
+          });
+          continue;
+        }
         final s = rec.createStream();
         s.acceptWaveform(samples: part, sampleRate: _rate);
         rec.decode(s);
@@ -305,7 +333,7 @@ void _asrMain(List<Object> args) {
       out.send('flushed');
     } else if (msg == 'stop') {
       vad.free();
-      rec.free();
+      rec?.free();
       spk?.free();
       inbox.close();
       Isolate.exit();
@@ -455,6 +483,7 @@ class LiveSession extends ChangeNotifier {
       } catch (_) {}
     }
   }
+
   StreamSubscription<Amplitude>? _amp;
   IOSink? _pcm;
   int _samples = 0; // 已写进原声的样本数：VAD 的 start 是从这一轮开录算的，要加上它
@@ -464,6 +493,30 @@ class LiveSession extends ChangeNotifier {
   SendPort? _toAsr;
   ReceivePort? _fromAsr;
   Completer<void>? _flushed;
+
+  // ───────── 识别在哪做：本机 / 云端 ─────────
+  /// 设置里选的：auto（默认：本机模型下好了就本机，没下好先用云端、后台接着下）/ local / cloud
+  String get engine => (store.settings['liveEngine'] as String?) ?? 'auto';
+  Future<void> setEngine(String v) async {
+    store.settings['liveEngine'] = v;
+    await store.save();
+    notifyListeners();
+  }
+
+  bool cloudAsr = false; // 这一场实际用的是云端识别
+  String? cloudError;
+  Future<void> _cloudChain = Future.value(); // 云端一句一句按顺序转、按顺序出字
+  Future<void>? _bgDownload;
+
+  /// 后台把本机模型下好（不挡着开录），下好了下一场就用本机。
+  void _downloadInBackground() {
+    _bgDownload ??= models
+        .ensure((_, _) {})
+        .then((_) => models.ensureSpeaker((_, _) {}))
+        .catchError((_) => false)
+        .whenComplete(() => _bgDownload = null);
+  }
+
   Timer? _saveDraft;
   Timer? _silenceCheck;
   bool _heard = false; // 这一轮有没有收到过非 0 的声音
@@ -485,7 +538,9 @@ class LiveSession extends ChangeNotifier {
       title = j['title'] ?? '';
       notes = j['notes'] ?? '';
       started = DateTime.tryParse(j['started'] ?? '');
-      lines.addAll([for (final x in (j['lines'] as List? ?? const [])) LiveLine.fromJson(Map<String, dynamic>.from(x))]);
+      lines.addAll([
+        for (final x in (j['lines'] as List? ?? const [])) LiveLine.fromJson(Map<String, dynamic>.from(x)),
+      ]);
       _samples = stem == null ? 0 : (_pcmFile(stem!).existsSync() ? _pcmFile(stem!).lengthSync() ~/ 2 : 0);
       _pausedAt = DateTime.tryParse(j['pausedAt'] ?? '') ?? DateTime.now();
       if (lines.isEmpty && notes.trim().isEmpty) {
@@ -556,19 +611,27 @@ class LiveSession extends ChangeNotifier {
     notifyListeners();
     try {
       if (!await _recorder.hasPermission()) throw Exception('没有麦克风权限：去系统设置里允许「小耳录音卡」使用麦克风');
-      if (!models.ready) {
-        await models.ensure((what, frac) {
+      cloudAsr = engine == 'cloud' || (engine == 'auto' && !models.ready && Cloud.instance != null);
+      if (cloudAsr) {
+        // 云端识别：本机只要切句模型（随 App 带着）；认人的声纹模型有就用，没有先不认人、后台下
+        await models.ensureVad();
+        speakerOff = !models.speaker.existsSync();
+        if (engine == 'auto') _downloadInBackground();
+      } else {
+        if (!models.ready) {
+          await models.ensure((what, frac) {
+            status = what;
+            progress = frac;
+            notifyListeners();
+          });
+        }
+        speakerOff = !await models.ensureSpeaker((what, frac) {
           status = what;
           progress = frac;
           notifyListeners();
         });
       }
-      speakerOff = !await models.ensureSpeaker((what, frac) {
-        status = what;
-        progress = frac;
-        notifyListeners();
-      });
-      status = '加载识别模型…';
+      status = cloudAsr ? '连接云端识别…' : '加载识别模型…';
       progress = null;
       notifyListeners();
       await _startAsr();
@@ -682,35 +745,64 @@ class LiveSession extends ChangeNotifier {
       if (msg is SendPort) {
         ready.complete(msg);
       } else if (msg == 'flushed') {
-        _flushed?.complete();
+        // 用云端识别时，路上还有几句没回来：等它们回来再算收完
+        final f = _flushed;
+        _cloudChain.whenComplete(() => f?.complete());
+      } else if (msg is Map && msg['pcm'] != null) {
+        final base = _roundBase;
+        _cloudChain = _cloudChain.then((_) async {
+          try {
+            final text = await Cloud.instance!.transcribe(msg['pcm'] as Uint8List);
+            if (cloudError != null) {
+              cloudError = null;
+              if (status != null && status!.startsWith('云端识别')) status = null;
+            }
+            _addLine(msg, text, base);
+          } catch (e) {
+            cloudError = '$e';
+            status = '云端识别连不上（这句没出字，录音照样存着）：$e';
+            notifyListeners();
+          }
+        });
       } else if (msg is Map) {
-        final at = started!.add(Duration(milliseconds: (_roundBase + (msg['start'] as int)) * 1000 ~/ _rate));
-        final emb = msg['emb'] as Float32List?;
-        final end = at.add(Duration(milliseconds: (msg['len'] as int) * 1000 ~/ _rate));
-        final text = fixWords(msg['text'] as String, vocab);
-        if (isFiller(text)) return;
-        final line = LiveLine(at, text, end: end, emb: emb, speaker: emb == null ? null : voices.identify(emb));
-        // 认得特别有把握的长句，自己学进声纹库（越聊越准；只留最近 10 条，学错也会被顶掉）
-        if (emb != null) {
-          voices.learn(emb, end.difference(at).inMilliseconds / 1000);
-          line.learned = true;
-        }
-        final joined = lines.isEmpty ? null : joinLines(lines.last, line, voices.identify);
-        if (joined != null) {
-          lines[lines.length - 1] = joined;
-        } else {
-          lines.add(line);
-        }
-        _persist();
-        notifyListeners();
+        _addLine(msg, msg['text'] as String, _roundBase);
       }
     });
     final threads = (Platform.numberOfProcessors ~/ 2).clamp(1, 4).toString();
     _iso = await Isolate.spawn(_asrMain, [
       _fromAsr!.sendPort,
-      [models.model.path, models.tokens.path, models.vad.path, threads, speakerOff ? '' : models.speaker.path],
+      [
+        cloudAsr ? '' : models.model.path,
+        models.tokens.path,
+        models.vad.path,
+        threads,
+        speakerOff ? '' : models.speaker.path,
+      ],
     ], errorsAreFatal: false);
     _toAsr = await ready.future.timeout(const Duration(minutes: 2));
+  }
+
+  /// 识别出一句：认人、学声纹、跟上一句能接就接上。[base] 是这一轮开录时已经录了多少样本。
+  void _addLine(Map msg, String raw, int base) {
+    final at = started!.add(Duration(milliseconds: (base + (msg['start'] as int)) * 1000 ~/ _rate));
+    final emb = msg['emb'] as Float32List?;
+    final end = at.add(Duration(milliseconds: (msg['len'] as int) * 1000 ~/ _rate));
+    final text = fixWords(raw.trim(), vocab);
+    if (text.isEmpty || isFiller(text)) return;
+    final line = LiveLine(at, text, end: end, emb: emb, speaker: emb == null ? null : voices.identify(emb));
+    // 认得特别有把握的长句，自己学进声纹库（越聊越准；只留最近 10 条，学错也会被顶掉）
+    if (emb != null) {
+      voices.learn(emb, end.difference(at).inMilliseconds / 1000);
+      line.learned = true;
+    }
+    final joined = lines.isEmpty ? null : joinLines(lines.last, line, voices.identify);
+    if (joined != null) {
+      lines[lines.length - 1] = joined;
+    } else {
+      lines.add(line);
+    }
+    _persist();
+    notifyListeners();
   }
 
   /// 把还在 VAD 里的最后一句出完，再关 isolate。
@@ -992,7 +1084,7 @@ String _wallIso(DateTime t) {
 /// 自检（给远程测试机用，不开界面）：用和现场会议完全相同的识别线程、切句合并、声纹，把一段 16k 单声道 wav
 /// 跑一遍，结果写进 [outDir]/selftest.json 后返回。模型也放在 [outDir] 里，不碰这台机器的录音卡资料。
 /// 用法：`LUYINKA_LIVE_SELFTEST="录音.wav|输出目录"` 启动 App（main.dart 里接）。
-Future<void> liveSelfTest(String wavPath, String outDir) async {
+Future<void> liveSelfTest(String wavPath, String outDir, {Cloud? cloud}) async {
   final dir = Directory(outDir)..createSync(recursive: true);
   final log = File('${dir.path}/selftest.log').openWrite();
   void say(String s) => log.writeln('${DateTime.now().toIso8601String().substring(11, 19)} $s');
@@ -1023,17 +1115,41 @@ Future<void> liveSelfTest(String wavPath, String outDir) async {
     final t0 = DateTime(2026, 1, 1, 10);
     final lines = <LiveLine>[];
     final voices = Voices(File('${dir.path}/voices.json'));
+    var chain = Future<void>.value(); // 云端识别：一句一句按顺序
+    final cloudMs = <int>[];
+    void add(Map msg, String text) {
+      final at = t0.add(Duration(milliseconds: (msg['start'] as int) * 1000 ~/ _rate));
+      final end = at.add(Duration(milliseconds: (msg['len'] as int) * 1000 ~/ _rate));
+      final emb = msg['emb'] as Float32List?;
+      if (text.trim().isEmpty || isFiller(text)) return;
+      final line = LiveLine(at, text.trim(), end: end, emb: emb, speaker: emb == null ? null : voices.identify(emb));
+      final joined = lines.isEmpty ? null : joinLines(lines.last, line, voices.identify);
+      joined != null ? lines[lines.length - 1] = joined : lines.add(line);
+    }
+
     from.listen((msg) {
       if (msg is SendPort) {
         ready.complete(msg);
       } else if (msg == 'flushed') {
-        done.complete();
+        chain.whenComplete(done.complete);
+      } else if (msg is Map && msg['pcm'] != null) {
+        chain = chain.then((_) async {
+          final w = Stopwatch()..start();
+          add(msg, await cloud!.transcribe(msg['pcm'] as Uint8List));
+          cloudMs.add(w.elapsedMilliseconds);
+        });
       } else if (msg is Map) {
         final at = t0.add(Duration(milliseconds: (msg['start'] as int) * 1000 ~/ _rate));
         final end = at.add(Duration(milliseconds: (msg['len'] as int) * 1000 ~/ _rate));
         final emb = msg['emb'] as Float32List?;
         if (isFiller(msg['text'] as String)) return;
-        final line = LiveLine(at, msg['text'] as String, end: end, emb: emb, speaker: emb == null ? null : voices.identify(emb));
+        final line = LiveLine(
+          at,
+          msg['text'] as String,
+          end: end,
+          emb: emb,
+          speaker: emb == null ? null : voices.identify(emb),
+        );
         final joined = lines.isEmpty ? null : joinLines(lines.last, line, voices.identify);
         joined != null ? lines[lines.length - 1] = joined : lines.add(line);
       }
@@ -1042,9 +1158,10 @@ Future<void> liveSelfTest(String wavPath, String outDir) async {
     sw.reset();
     final iso = await Isolate.spawn(_asrMain, [
       from.sendPort,
-      [models.model.path, models.tokens.path, models.vad.path, threads, spk ? models.speaker.path : ''],
+      [cloud != null ? '' : models.model.path, models.tokens.path, models.vad.path, threads, spk ? models.speaker.path : ''],
     ]);
     final to = await ready.future.timeout(const Duration(minutes: 3));
+    if (cloud != null) result['识别'] = '云端';
     result['加载模型秒'] = sw.elapsedMilliseconds / 1000;
     sw.reset();
     // 像麦克风那样每次 0.1 秒一块，但不等真实时间：测的是处理速度（实时系数 < 1 才跟得上说话）
@@ -1067,6 +1184,10 @@ Future<void> liveSelfTest(String wavPath, String outDir) async {
     result['句数'] = lines.length;
     result['有声纹的句数'] = lines.where((l) => l.emb != null).length;
     result['内存峰值MB'] = ProcessInfo.maxRss ~/ (1024 * 1024);
+    if (cloudMs.isNotEmpty) {
+      cloudMs.sort();
+      result['云端每句毫秒（中位 / 最慢）'] = '${cloudMs[cloudMs.length ~/ 2]} / ${cloudMs.last}';
+    }
     result['原话'] = [for (final l in lines) '${_hms(l.at)} ${l.text}'];
     result['ok'] = lines.isNotEmpty;
   } catch (e, st) {
