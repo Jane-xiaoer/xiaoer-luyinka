@@ -160,7 +160,7 @@ class Mascot extends StatelessWidget {
   const Mascot(this.pose, {super.key, this.size = 40, this.halo = false});
   @override
   Widget build(BuildContext context) {
-    if (!K.cute) return SizedBox(width: halo ? size * 1.3 : 0, height: 0); // 简约风不放吉祥物
+    if (!K.cute) return const SizedBox.shrink(); // 简约风不放吉祥物
     final img = Image.asset('assets/mascot/$pose.png', height: size, filterQuality: FilterQuality.medium);
     if (!halo) return img;
     return SizedBox(

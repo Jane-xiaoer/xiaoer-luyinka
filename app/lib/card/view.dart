@@ -184,7 +184,9 @@ class _CardViewState extends State<CardView> {
                   color: K.blush,
                   shape: BoxShape.circle,
                 ),
-                child: Mascot(_here ? 'stand' : 'sleep', size: 84),
+                child: K.cute
+                    ? Mascot(_here ? 'stand' : 'sleep', size: 84)
+                    : Icon(Icons.sd_card_outlined, size: 40, color: _here ? K.accent : K.faint),
               ),
               const SizedBox(width: 18),
               Expanded(

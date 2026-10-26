@@ -495,7 +495,7 @@ class _LiveViewState extends State<LiveView> {
               Icon(Icons.laptop_mac_rounded, size: 16, color: on ? K.live : K.mute),
               const SizedBox(width: 6),
               Text(
-                on ? '电脑声音：开着（对方说话也会出字）' : '电脑声音：关着（开线上会议时打开）',
+                '电脑声音',
                 style: TextStyle(
                   fontSize: 13,
                   color: on ? K.live : K.mute,
@@ -551,7 +551,6 @@ class _LiveViewState extends State<LiveView> {
       runSpacing: 8,
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
-        _pill(rec ? '录音中 $clock' : (live.state == LiveState.paused ? '已暂停 $clock' : clock), rec),
         if (live.cloudAsr)
           Tooltip(
             message: '本机识别模型还在后台下载，这场先用云端识别（每句晚几秒出字）。下好以后下一场自动改回本机。',
@@ -569,7 +568,7 @@ class _LiveViewState extends State<LiveView> {
         FilledButton(
           onPressed: busy ? null : _finish,
           style: FilledButton.styleFrom(backgroundColor: K.accent),
-          child: const Text('结束，收进录音卡'),
+          child: const Text('结束并保存'),
         ),
         _systemChip(),
         if (live.state == LiveState.paused)
@@ -593,17 +592,18 @@ class _LiveViewState extends State<LiveView> {
       ),
       onChanged: live.setTitle,
     );
+    // 两行：标题 + 计时；下面一排动作（挤在一行时标题会被压没）
     return Padding(
       padding: EdgeInsets.fromLTRB(wide ? 22 : 14, 10, wide ? 18 : 14, 12),
-      child: wide
-          ? Row(
-              children: [
-                Expanded(child: title),
-                const SizedBox(width: 12),
-                buttons,
-              ],
-            )
-          : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [title, const SizedBox(height: 8), buttons]),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Expanded(child: title),
+          const SizedBox(width: 12),
+          _pill(rec ? '录音中 $clock' : (live.state == LiveState.paused ? '已暂停 $clock' : clock), rec),
+        ]),
+        const SizedBox(height: 8),
+        buttons,
+      ]),
     );
   }
 
@@ -649,7 +649,7 @@ class _LiveViewState extends State<LiveView> {
   Widget _transcript() => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
-      _paneTitle('原话', live.lines.isEmpty ? null : '双击一句进笔记；拖选一段或单击多选，点旁边的「添加笔记」；点「？」标是谁说的'),
+      _paneTitle('原话', live.lines.isEmpty ? null : '双击一句进笔记'),
       Expanded(
         child: live.lines.isEmpty
             ? Center(

@@ -1042,11 +1042,11 @@ class MeetButton extends StatelessWidget {
         listenable: live ?? ValueNotifier(0),
         builder: (_, _) {
           final rec = live?.state == LiveState.recording;
-          final active = live?.active == true;
+          final active = live?.active == true; // 有一场没结束（暂停着）
           return FilledButton.icon(
             onPressed: onTap,
-            icon: Icon(rec ? Icons.fiber_manual_record : Icons.mic_none_rounded, size: 15),
-            label: Text(rec ? '会议中' : (active ? '接着开' : '开会')),
+            icon: Icon(rec || active ? Icons.fiber_manual_record : Icons.mic_none_rounded, size: rec || active ? 10 : 15),
+            label: const Text('开会'),
             style: FilledButton.styleFrom(
               backgroundColor: rec || selected ? K.accent : K.card,
               foregroundColor: rec || selected ? Colors.white : K.ink,

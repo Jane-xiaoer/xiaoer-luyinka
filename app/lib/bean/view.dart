@@ -199,10 +199,9 @@ class _BeanViewState extends State<BeanView> {
                   color: K.blush,
                   shape: BoxShape.circle,
                 ),
-                child: Mascot(
-                  bean.connected || bean.here == true ? 'stand' : 'sleep',
-                  size: 84,
-                ),
+                child: K.cute
+                    ? Mascot(bean.connected || bean.here == true ? 'stand' : 'sleep', size: 84)
+                    : Icon(Icons.graphic_eq_rounded, size: 40, color: bean.connected || bean.here == true ? K.accent : K.faint),
               ),
               const SizedBox(width: 18),
               Expanded(
