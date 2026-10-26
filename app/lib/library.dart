@@ -419,6 +419,17 @@ Obsidian →「打开文件夹作为仓库」→ 选这个文件夹就行。每�
 - `noise`：标成杂音，不再显示。`merge`：跟同一条录音里的上一段合成一段（重新整理）。
 - `todo`：第几条待办打勾（从 0 数，`"done": false` 取消；提醒加 `"kind": "reminders"`）。
 
+## 换大模型（整理录音、问问小耳用的）
+
+小耳默认用的是小耳云端提供的体验额度（每天有限）。建议换成你自己的：在 App「设置 → 整理用的模型」里填，
+或者让你的 AI 往 `.xiaoer/commands/` 放一个命令（OpenAI 兼容的接口都行，DeepSeek、通义千问、Kimi、智谱、OpenAI…）：
+
+```json
+{"op": "model", "provider": "DeepSeek", "base": "https://api.deepseek.com/v1", "model": "deepseek-chat", "key": "sk-…"}
+```
+
+App 收到就改用这个模型，并把命令文件里的 key 抹掉（结果里显示「已抹掉」）。key 只存在这台电脑的 App 设置里，不经过小耳的服务器。
+
 ## 放一条录音进来
 
 往 `.xiaoer/inbox/` 放 `<名字>.json`（`{"start": "2026-10-25T14:00:00", "lines": [["14:00:05", "说的话"], …]}`，写完再改名成 .json）

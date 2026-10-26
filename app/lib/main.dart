@@ -119,6 +119,6 @@ class LuyinkaApp extends StatelessWidget {
     title: '小耳录音卡',
     debugShowCheckedModeBanner: false,
     theme: buildTheme(),
-    home: Home(store: store, syncer: syncer, live: live, bean: bean),
+    home: Home(store: store, syncer: syncer, live: live, bean: bean, askOwnKey: true),
   );
 }

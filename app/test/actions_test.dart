@@ -100,4 +100,19 @@ void main() {
     final res = jsonDecode(File('${dir.path}/done/001.result.json').readAsStringSync()) as List;
     expect(res.map((x) => x['ok']), [true, false]);
   });
+
+  test('换模型：只认外面放进来的命令；key 用完从命令文件里抹掉；对话里不行', () async {
+    final dir = Directory('${lib.path}/.xiaoer/commands')..createSync(recursive: true);
+    File('${dir.path}/m.json').writeAsStringSync(jsonEncode(
+        {'op': 'model', 'provider': 'DeepSeek', 'base': 'https://api.deepseek.com/v1', 'model': 'deepseek-chat', 'key': 'sk-secret'}));
+    expect(await runCommandInbox(store, note), 1);
+    expect(store.settings['llm'], {
+      'own': true, 'provider': 'DeepSeek', 'base': 'https://api.deepseek.com/v1', 'model': 'deepseek-chat', 'key': 'sk-secret'});
+    for (final f in Directory('${dir.path}/done').listSync().whereType<File>()) {
+      expect(f.readAsStringSync(), isNot(contains('sk-secret')), reason: f.path);
+    }
+    final r = await applyEdits(store, [EditOp({'op': 'model', 'base': 'https://x/v1', 'model': 'm', 'key': 'k'})], note);
+    expect(r.single, contains('设置里换'));
+    expect(store.settings['llm']['key'], 'sk-secret');
+  });
 }

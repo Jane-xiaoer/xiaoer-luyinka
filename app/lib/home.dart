@@ -38,7 +38,8 @@ class Home extends StatefulWidget {
   final Syncer syncer;
   final LiveSession live;
   final BeanSyncer? bean;
-  const Home({super.key, required this.store, required this.syncer, required this.live, this.bean});
+  final bool askOwnKey; // 第一次打开问一句「填你自己的模型 key」（App 里开，测试里不弹）
+  const Home({super.key, required this.store, required this.syncer, required this.live, this.bean, this.askOwnKey = false});
   @override
   State<Home> createState() => _HomeState();
 }
@@ -114,7 +115,39 @@ class _HomeState extends State<Home> {
     widget.syncer.onChange = () {
       if (mounted) setState(() {});
     };
+    WidgetsBinding.instance.addPostFrameCallback((_) => _askOwnKey());
     store.addListener(_onStore);
+  }
+
+  /// 第一次打开：还没填自己的模型 key，说一声（只问一次；之后问答框上面一直有一行小字提醒）
+  Future<void> _askOwnKey() async {
+    if (!mounted || !widget.askOwnKey || widget.syncer.llm.own || store.settings['ownKeyTold'] == true) return;
+    store.settings['ownKeyTold'] = true;
+    await store.save();
+    if (!mounted) return;
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        backgroundColor: K.card,
+        title: const Text('填上你自己的大模型 key'),
+        content: const Text(
+          '录音转成文字在你的电脑上做，不花钱；按类别整理、写纪要、问问小耳要用大模型。\n\n'
+          '现在先用小耳的体验额度（每天有限）。建议填你自己的 key：DeepSeek、通义千问、Kimi、智谱、OpenAI 都行，'
+          'key 只存在这台电脑上，不经过小耳的服务器。\n\n'
+          '也可以让你的 AI（Claude Code、Codex…）照资料文件夹里的「给AI的接口.md」帮你接上它想用的模型。',
+          style: TextStyle(height: 1.6),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('先用体验额度')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: K.accent),
+            onPressed: () => Navigator.pop(c, true),
+            child: const Text('现在去填'),
+          ),
+        ],
+      ),
+    );
+    if (go == true && mounted) showSettings(context, store, widget.syncer);
   }
 
   void _onStore() {
@@ -1922,6 +1955,16 @@ class AskBoxState extends State<AskBox> {
                 icon: const Icon(Icons.expand_less, size: 18),
                 label: Text('${_busy ? '小耳在写… ' : ''}展开对话（${_history.length} 轮）', style: const TextStyle(fontSize: 12.5)),
               ),
+            ),
+          ),
+        // 还在用小耳的体验额度：提醒填自己的模型 key（对外发的版本，每个人用自己的）
+        if (Llm.instance != null && !Llm.instance!.own)
+          const Padding(
+            padding: EdgeInsets.fromLTRB(20, 8, 20, 0),
+            child: Text(
+              '整理和问答现在用的是小耳的体验额度（每天有限）。在左下角「设置」里填你自己的模型 key（DeepSeek 等），'
+              '或让你的 AI 照资料文件夹里的「给AI的接口.md」帮你接上。',
+              style: TextStyle(fontSize: 12, color: K.faint, height: 1.5),
             ),
           ),
         Container(

@@ -8,6 +8,8 @@
 //   edit：title / event / place / people（数组）里要改的几项
 //   noise：标成杂音（不再显示）；merge：跟同一条录音里的上一段合成一段
 //   todo：index（第几条待办，从 0 数）、kind（actions 待办 / reminders 提醒，默认 actions）、done（true / false）
+//   model（只认外面放进来的命令，对话里不行）：换整理 / 问答用的大模型 {"op":"model","base":"https://…/v1","model":"…","key":"…"}，
+//     OpenAI 兼容接口；key 用完就从命令文件里抹掉
 import 'dart:convert';
 import 'dart:io';
 
@@ -39,8 +41,23 @@ class EditOp {
 
 /// 照 [op] 改一段。返回一句说明（给人看）；做不了抛 [StateError]，说明原因。
 /// [note]：按类别模板重新写笔记（Analyzer.note），改类别 / 合并时用。
-Future<String> applyEdit(Store store, EditOp op, Future<String> Function(Scene) note) async {
+Future<String> applyEdit(Store store, EditOp op, Future<String> Function(Scene) note, {bool fromOutside = false}) async {
   if (op.op.isEmpty) throw StateError('这条看不懂：${op.j['raw'] ?? jsonEncode(op.j)}');
+  if (op.op == 'model') {
+    if (!fromOutside) throw StateError('换模型要在设置里换，或让你的 AI 按「给AI的接口.md」放命令文件');
+    final base = (op.j['base'] ?? '').toString().trim(), model = (op.j['model'] ?? '').toString().trim();
+    final key = (op.j['key'] ?? '').toString().trim();
+    if (!base.startsWith('http') || model.isEmpty || key.isEmpty) throw StateError('要给全 base（https://…/v1）、model、key');
+    store.settings['llm'] = {
+      'own': true,
+      'provider': (op.j['provider'] ?? '自定义').toString(),
+      'base': base,
+      'model': model,
+      'key': key,
+    };
+    await store.save();
+    return '整理和问答改用你的模型：$model（$base）';
+  }
   final s = store.sceneById(op.id);
   if (s == null) throw StateError('找不到 id 是 ${op.id} 的那一段');
   final name = '《${s.title}》';
@@ -120,10 +137,11 @@ Future<int> runCommandInbox(Store store, Future<String> Function(Scene) note) as
       final list = j is List ? j : [j];
       for (final x in list) {
         final op = EditOp(Map<String, dynamic>.from(x as Map));
+        final shown = {...op.j, if (op.j.containsKey('key')) 'key': '（已抹掉）'};
         try {
-          results.add({...op.j, 'ok': true, 'message': await applyEdit(store, op, note)});
+          results.add({...shown, 'ok': true, 'message': await applyEdit(store, op, note, fromOutside: true)});
         } catch (e) {
-          results.add({...op.j, 'ok': false, 'message': e is StateError ? e.message : '$e'});
+          results.add({...shown, 'ok': false, 'message': e is StateError ? e.message : '$e'});
         }
       }
     } catch (e) {
@@ -132,7 +150,16 @@ Future<int> runCommandInbox(Store store, Future<String> Function(Scene) note) as
     await done.create(recursive: true);
     await File('${done.path}/${name.replaceAll(RegExp(r'\.json$'), '')}.result.json')
         .writeAsString(const JsonEncoder.withIndent('  ').convert(results));
-    await f.rename('${done.path}/$name');
+    // 原命令挪进 done/；里面要是带了 key（换模型），抹掉再存，别把 key 留在会同步的文稿里
+    try {
+      final j = jsonDecode(await f.readAsString());
+      Object mask(Object? x) => x is Map ? {...x, if (x.containsKey('key')) 'key': '（已抹掉）'} : x as Object;
+      await File('${done.path}/$name').writeAsString(
+          const JsonEncoder.withIndent('  ').convert(j is List ? [for (final x in j) mask(x)] : mask(j)));
+      await f.delete();
+    } catch (_) {
+      await f.rename('${done.path}/$name');
+    }
     n++;
   }
   return n;

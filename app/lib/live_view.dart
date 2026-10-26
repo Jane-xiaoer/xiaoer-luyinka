@@ -554,6 +554,11 @@ class _LiveViewState extends State<LiveView> {
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
         _pill(rec ? '录音中 $clock' : (live.state == LiveState.paused ? '已暂停 $clock' : clock), rec),
+        if (live.cloudAsr)
+          Tooltip(
+            message: '本机识别模型还在后台下载，这场先用云端识别（每句晚几秒出字）。下好以后下一场自动改回本机。',
+            child: _pill('云端识别 · 本机模型下载中', false),
+          ),
         OutlinedButton.icon(
           onPressed: busy ? null : (rec ? live.pause : live.start),
           icon: Icon(rec ? Icons.pause_rounded : Icons.mic_rounded, size: 18),
