@@ -434,7 +434,12 @@ def download_page() -> str:
     d = DATA / "download"
     files = sorted(d.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True) if d.exists() else []
     mac = next((p.name for p in files if p.suffix == ".dmg"), None)
-    apk = next((p.name for p in files if p.suffix == ".apk"), None)
+    # 安卓分两个包（一台手机只用得上一种芯片的，全塞一个包要 140MB）：主流手机（arm64）+ 2017 年以前的老手机（armv7，文件名带「老手机」）
+    apk = next((p.name for p in files if p.suffix == ".apk" and "老手机" not in p.name), None)
+    old = next((p.name for p in files if p.suffix == ".apk" and "老手机" in p.name), None)
+
+    def mb(name):
+        return f"{(d / name).stat().st_size / 1e6:.0f}MB" if name else ""
 
     def btn(name, label, sub):
         if not name:
@@ -453,7 +458,8 @@ ol{{color:#4f6a64;line-height:1.9;padding-left:20px}} ol li::marker{{color:#d95e
 @media (max-width:560px){{main{{margin:16px;padding:28px 20px}}}}</style></head><body><main>
 <img src="/icon.png" width="96" height="96" alt="" style="display:block;margin:0 0 16px -8px"><h1>小耳录音卡</h1><svg class="wave" width="132" height="12" viewBox="0 0 132 12"><path d="M1 7 Q7 1 13 7 T26 6 Q33 2 39 7 T53 6 Q59 1 66 7 T79 6 Q86 2 92 7 T106 6 Q112 1 119 7 T131 6" fill="none" stroke="#d95e54" stroke-width="2.2" stroke-linecap="round"/></svg><p>录音卡别在身上录一整天，放回手机或电脑旁边，自动拉过来、转成文字、按话题整理好。点一下就能交给你的 AI。</p>
 {btn(mac, "下载 Mac 版", "macOS · 拖进「应用程序」就能用")}
-{btn(apk, "下载安卓版", "安卓手机 · 下载后点开安装（要允许安装未知来源应用）")}
+{btn(apk, "下载安卓版", f"安卓手机 · {mb(apk)} · 下载后点开安装（要允许安装未知来源应用）")}
+{f'<p style="margin:-4px 0 20px;font-size:13px">2017 年以前的老安卓手机装不上？<a href="/download/{quote(old)}" download style="color:#d95e54">下载老手机版（{mb(old)}）</a></p>' if old else ''}
 <ol><li>录音卡开机，放在旁边。</li><li>打开 App，第一次点「允许」使用蓝牙。</li><li>录音会自动出现，一天一页。</li></ol>
 </main></body></html>"""
 
