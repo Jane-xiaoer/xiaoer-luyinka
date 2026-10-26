@@ -76,7 +76,7 @@ const girlSkin = Skin(
 /// 白字、苹果蓝强调，没有吉祥物和手绘点缀，标题用黑体。
 const glassSkin = Skin(
   key: 'glass',
-  name: '深色 · 蓝',
+  name: '深色',
   dark: true,
   glow: Color(0xFF1E6BFF),
   sage: Color(0x1A000000), // 左栏、窗口底：几乎透明，底下的蓝光透上来
@@ -107,40 +107,7 @@ const glassSkin = Skin(
   ],
 );
 
-const glassGreenSkin = Skin(
-  key: 'glassGreen',
-  name: '深色 · 绿',
-  dark: true,
-  glow: Color(0xFF1FB86A),
-  sage: Color(0x1A000000), // 左栏、窗口底：几乎透明，底下的蓝光透上来
-  card: Color(0xB30A0F0C), // 内容面板：半透明近黑（带一点绿）+ 背后模糊 = 磨砂玻璃
-  cardDeep: Color(0x12FFFFFF),
-  line: Color(0x1FFFFFFF),
-  lineStrong: Color(0x33FFFFFF),
-  ink: Color(0xFFF5F5F7),
-  mute: Color(0xFFC7C7CC),
-  faint: Color(0xFF8E8E93),
-  accent: Color(0xFF30C46F),
-  accentSoft: Color(0x3330C46F),
-  accentEdge: Color(0x6630C46F),
-  blush: Color(0x2630C46F),
-  live: Color(0xFF30D158),
-  todo: Color(0xFFFF9F0A),
-  todoSoft: Color(0x33FF9F0A),
-  todoBg: Color(0x1AFF9F0A),
-  serifTitle: false,
-  cute: false,
-  cats: [
-    (Color(0x2EFFFFFF), Color(0xFFE5E5EA)),
-    (Color(0x330A84FF), Color(0xFF64D2FF)),
-    (Color(0x33FF9F0A), Color(0xFFFFD60A)),
-    (Color(0x3330D158), Color(0xFF30D158)),
-    (Color(0x33BF5AF2), Color(0xFFDA8FFF)),
-    (Color(0x33FF375F), Color(0xFFFF6482)),
-  ],
-);
-
-const skins = [girlSkin, glassSkin, glassGreenSkin];
+const skins = [girlSkin, glassSkin];
 
 /// 现在用的皮肤（App 根上听它，一换整个界面重画）。
 final skin = ValueNotifier<Skin>(girlSkin);
