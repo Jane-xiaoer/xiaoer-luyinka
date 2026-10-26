@@ -489,7 +489,7 @@ class _BeanViewState extends State<BeanView> {
                 selected: _filter == k,
                 onSelected: (_) => setState(() => _filter = k),
                 showCheckmark: false,
-                selectedColor: K.cardDeep,
+                selectedColor: K.picked,
                 side: BorderSide(color: K.line),
                 labelStyle: TextStyle(
                   fontSize: 12.5,
@@ -694,8 +694,8 @@ class _BeanViewState extends State<BeanView> {
         FilledButton(
           onPressed: () => bean.moveIn(f),
           style: FilledButton.styleFrom(
-            backgroundColor: K.ink,
-            foregroundColor: K.card,
+            backgroundColor: K.strong,
+            foregroundColor: K.onStrong,
             visualDensity: VisualDensity.compact,
           ),
           child: const Text('导入录音卡'),
@@ -749,8 +749,8 @@ class _BeanViewState extends State<BeanView> {
       side: BorderSide(color: K.lineStrong),
     );
     final dark = FilledButton.styleFrom(
-      backgroundColor: K.ink,
-      foregroundColor: K.card,
+      backgroundColor: K.strong,
+      foregroundColor: K.onStrong,
     );
     openRecSheet(
       context,

@@ -76,9 +76,9 @@ const glassSkin = Skin(
   key: 'glass',
   name: '深色玻璃',
   dark: true,
-  sage: Color(0x00000000), // 透明：露出毛玻璃
-  card: Color(0xE61D1D20),
-  cardDeep: Color(0x14FFFFFF),
+  sage: Color(0x33000000), // 左栏、窗口底：薄薄压一层暗，底下的渐变壁纸透上来
+  card: Color(0x8C141418), // 内容面板：半透明深灰 + 背后模糊 = 磨砂玻璃
+  cardDeep: Color(0x12FFFFFF),
   line: Color(0x1FFFFFFF),
   lineStrong: Color(0x33FFFFFF),
   ink: Color(0xFFF5F5F7),
@@ -131,6 +131,14 @@ class K {
   static Color get todoBg => _s.todoBg;
   static bool get cute => _s.cute;
   static bool get dark => _s.dark;
+  /// 主按钮的底：少女风珊瑚粉，深色玻璃是半透明苹果蓝
+  static Color get cta => _s.dark ? const Color(0xD90A84FF) : _s.accent;
+  /// 深色实心按钮（交给 Agent、导入录音卡、播放）：少女风墨色底 + 米白字；深色玻璃是磨砂白玻璃 + 白字
+  static Color get strong => _s.dark ? const Color(0x2EFFFFFF) : _s.ink;
+  static Color get onStrong => _s.dark ? _s.ink : _s.card;
+  /// 选中的筛选标签
+  static Color get picked => _s.dark ? const Color(0x400A84FF) : _s.cardDeep;
+
   /// 设备页那几块：少女风是半透明白，深色玻璃是一层很淡的亮
   static Color get tile => _s.dark ? _s.cardDeep : Colors.white.withValues(alpha: 0.6);
 
@@ -173,6 +181,34 @@ ThemeData buildTheme() {
     textSelectionTheme: TextSelectionThemeData(cursorColor: K.accent, selectionColor: K.accent.withValues(alpha: 0.3)),
     popupMenuTheme: PopupMenuThemeData(color: K.dark ? const Color(0xFF2C2C2E) : K.card),
     dialogTheme: DialogThemeData(backgroundColor: K.dark ? const Color(0xF22C2C2E) : K.card),
+    // 深色玻璃：按钮、标签都是磨砂玻璃——半透明白 + 一圈细亮边；主按钮是半透明的苹果蓝
+    outlinedButtonTheme: K.dark
+        ? OutlinedButtonThemeData(
+            style: OutlinedButton.styleFrom(
+              backgroundColor: const Color(0x1AFFFFFF),
+              foregroundColor: K.ink,
+              side: const BorderSide(color: Color(0x33FFFFFF)),
+            ),
+          )
+        : null,
+    filledButtonTheme: K.dark
+        ? FilledButtonThemeData(
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xD90A84FF),
+              foregroundColor: Colors.white,
+              side: const BorderSide(color: Color(0x40FFFFFF)),
+            ),
+          )
+        : null,
+    chipTheme: K.dark
+        ? ChipThemeData(
+            backgroundColor: const Color(0x14FFFFFF),
+            selectedColor: const Color(0x400A84FF),
+            side: const BorderSide(color: Color(0x26FFFFFF)),
+            labelStyle: TextStyle(color: K.ink),
+          )
+        : null,
+    iconButtonTheme: K.dark ? IconButtonThemeData(style: IconButton.styleFrom(foregroundColor: K.mute)) : null,
   );
 }
 
@@ -320,4 +356,37 @@ String dayTitle(String key, {bool short = false}) {
 String duration(Duration d) {
   final h = d.inHours, m = d.inMinutes % 60;
   return h > 0 ? '$h 小时 $m 分' : (d.inMinutes > 0 ? '${d.inMinutes} 分钟' : '${d.inSeconds} 秒');
+}
+
+/// 深色玻璃的壁纸：近黑底上几团大光斑（橙 → 洋红 → 靛蓝），像 Mac 的渐变壁纸，玻璃面板浮在上面。
+class GlassBackdrop extends StatelessWidget {
+  const GlassBackdrop({super.key});
+
+  @override
+  Widget build(BuildContext context) => DecoratedBox(
+        decoration: const BoxDecoration(color: Color(0xFF0A0A12)),
+        child: Stack(fit: StackFit.expand, children: const [
+          _Glow(Alignment(-1.1, 1.2), Color(0xFFFF6A1A), 1.3), // 左下：橙
+          _Glow(Alignment(0.2, 0.9), Color(0xFFE0337A), 1.1), // 下方：洋红
+          _Glow(Alignment(1.2, -0.9), Color(0xFF3B3BFF), 1.2), // 右上：靛蓝
+          _Glow(Alignment(-0.6, -1.3), Color(0xFF7A2BD6), 0.9), // 左上：紫
+        ]),
+      );
+}
+
+class _Glow extends StatelessWidget {
+  final Alignment at;
+  final Color color;
+  final double radius;
+  const _Glow(this.at, this.color, this.radius);
+  @override
+  Widget build(BuildContext context) => DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: RadialGradient(
+            center: at,
+            radius: radius,
+            colors: [color.withValues(alpha: 0.75), color.withValues(alpha: 0.0)],
+          ),
+        ),
+      );
 }

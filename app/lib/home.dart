@@ -1,6 +1,7 @@
 // 主界面（方向 A · 今天时间线）：宽屏三栏 = 日子 / 当天时间线 + 问答 / 场景详情 + 播放条；手机 = 当天列表 → 点进详情。
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui' show ImageFilter;
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
@@ -146,7 +147,7 @@ class _HomeState extends State<Home> {
         actions: [
           TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('先用体验额度')),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: K.accent),
+            style: FilledButton.styleFrom(backgroundColor: K.cta),
             onPressed: () => Navigator.pop(c, true),
             child: const Text('现在去填'),
           ),
@@ -399,13 +400,17 @@ class _HomeState extends State<Home> {
                 people: people, person: person, onPickPerson: pickPerson,
                 todoCount: openTodos, weeks: weeks, week: week?.key, onPickWeek: pickWeek, live: widget.live, bean: widget.bean,
                 search: SearchField(controller: _search, onChanged: _onSearch, onClear: clearSearch))),
-        Expanded(child: Container(
+        Expanded(child: _frosted(Container(
           margin: const EdgeInsets.fromLTRB(0, 12, 12, 12),
           clipBehavior: Clip.antiAlias,
           decoration: BoxDecoration(
             color: K.card,
             borderRadius: BorderRadius.circular(22),
-            boxShadow: const [BoxShadow(color: Color(0x261F4A44), blurRadius: 24, offset: Offset(0, 8))],
+            // 深色玻璃：一圈很细的亮边（玻璃的边），影子更深
+            border: K.dark ? Border.all(color: const Color(0x1FFFFFFF)) : null,
+            boxShadow: [
+              BoxShadow(color: K.dark ? const Color(0x66000000) : const Color(0x261F4A44), blurRadius: 24, offset: const Offset(0, 8)),
+            ],
           ),
           child: _live && !searching
               ? LiveView(live: widget.live, top: 24)
@@ -458,8 +463,27 @@ class _HomeState extends State<Home> {
                         : SceneDetail(scene: scene!, player: player, store: store, top: 36, onQuick: _quick,
                             onMerged: _pickScene, onRecut: widget.syncer.reanalyze)),
           ]),
-        )),
+        ))),
       ]);
+
+  /// 深色玻璃：内容面板背后模糊一下（磨砂玻璃）；少女风原样
+  Widget _frosted(Widget panel) => K.dark
+      ? Padding(
+          padding: EdgeInsets.zero,
+          child: Stack(fit: StackFit.passthrough, children: [
+            Positioned.fill(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(0, 12, 12, 12),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(22),
+                  child: BackdropFilter(filter: ImageFilter.blur(sigmaX: 30, sigmaY: 30), child: const SizedBox.expand()),
+                ),
+              ),
+            ),
+            panel,
+          ]),
+        )
+      : panel;
 
   Widget _narrow() => Column(children: [
         Padding(
@@ -884,7 +908,7 @@ class HandoffButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) => FilledButton.icon(
         style: FilledButton.styleFrom(
-            backgroundColor: K.ink, foregroundColor: K.card, minimumSize: Size(0, compact ? 34 : 38),
+            backgroundColor: K.strong, foregroundColor: K.onStrong, minimumSize: Size(0, compact ? 34 : 38),
             padding: EdgeInsets.symmetric(horizontal: compact ? 12 : 16)),
         onPressed: onPressed,
         icon: const Icon(Icons.arrow_forward, size: 16),
@@ -2353,7 +2377,7 @@ class _CategoryChipState extends State<CategoryChip> {
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
           FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: K.accent), onPressed: () => Navigator.pop(ctx, true), child: const Text('好')),
+              style: FilledButton.styleFrom(backgroundColor: K.cta), onPressed: () => Navigator.pop(ctx, true), child: const Text('好')),
         ],
       ),
     );
@@ -2444,7 +2468,7 @@ class _MergeBarState extends State<MergeBar> {
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
             FilledButton(
-                style: FilledButton.styleFrom(backgroundColor: K.accent), onPressed: () => Navigator.pop(ctx, true), child: Text(ok)),
+                style: FilledButton.styleFrom(backgroundColor: K.cta), onPressed: () => Navigator.pop(ctx, true), child: Text(ok)),
           ],
         ),
       ) ==
@@ -2762,7 +2786,7 @@ class PlayerBar extends StatelessWidget {
           decoration: BoxDecoration(color: K.bar, border: Border(top: BorderSide(color: K.line))),
           child: Row(children: [
             IconButton.filled(
-              style: IconButton.styleFrom(backgroundColor: K.ink),
+              style: IconButton.styleFrom(backgroundColor: K.strong),
               tooltip: player.playing ? '暂停' : '播放',
               onPressed: player.toggle,
               icon: Icon(player.playing ? Icons.pause : Icons.play_arrow, color: Colors.white),
@@ -3485,7 +3509,7 @@ class WeekReview extends StatelessWidget {
               Align(
                 alignment: Alignment.centerLeft,
                 child: FilledButton.icon(
-                  style: FilledButton.styleFrom(backgroundColor: K.accent),
+                  style: FilledButton.styleFrom(backgroundColor: K.cta),
                   onPressed: () => onGenerate(week),
                   icon: const Icon(Icons.auto_awesome_outlined, size: 16),
                   label: const Text('生成这周回顾'),
@@ -3546,7 +3570,7 @@ class IdeasView extends StatelessWidget {
               Align(
                 alignment: Alignment.centerLeft,
                 child: FilledButton.icon(
-                  style: FilledButton.styleFrom(backgroundColor: K.accent),
+                  style: FilledButton.styleFrom(backgroundColor: K.cta),
                   onPressed: onGenerate,
                   icon: const Icon(Icons.auto_awesome_outlined, size: 16),
                   label: const Text('开始整理'),

@@ -203,7 +203,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
       const SizedBox(height: 12),
       Row(children: [
         FilledButton.icon(
-          style: FilledButton.styleFrom(backgroundColor: K.accent),
+          style: FilledButton.styleFrom(backgroundColor: K.cta),
           onPressed: () async {
             final entries = await showDialog<List<VocabEntry>>(
               context: context,
@@ -362,7 +362,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
                   TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')),
                   const SizedBox(width: 6),
                   FilledButton(
-                    style: FilledButton.styleFrom(backgroundColor: K.accent),
+                    style: FilledButton.styleFrom(backgroundColor: K.cta),
                     onPressed: _save,
                     child: const Text('保存'),
                   ),

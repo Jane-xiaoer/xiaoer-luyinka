@@ -122,6 +122,8 @@ class LuyinkaApp extends StatelessWidget {
       title: '小耳录音卡',
       debugShowCheckedModeBanner: false,
       theme: buildTheme(),
+      // 深色玻璃：App 自己垫一张渐变壁纸，玻璃面板浮在上面（只靠桌面透上来，桌面浅时一片灰白）
+      builder: (_, child) => s.dark ? Stack(fit: StackFit.expand, children: [const GlassBackdrop(), child!]) : child!,
       home: KeyedSubtree(
         key: ValueKey(s.key),
         child: Home(store: store, syncer: syncer, live: live, bean: bean, askOwnKey: true),

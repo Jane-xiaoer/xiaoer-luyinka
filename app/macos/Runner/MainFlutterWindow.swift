@@ -10,7 +10,7 @@ class MainFlutterWindow: NSWindow {
     // 深色玻璃皮肤把左栏、窗口底画成透明，就露出这层（像访达的侧栏）。
     flutterViewController.backgroundColor = .clear
     let blur = NSVisualEffectView()
-    blur.material = .sidebar
+    blur.material = .hudWindow // 深色、更透（.sidebar 在深色下是一片平灰，看不出玻璃）
     blur.blendingMode = .behindWindow
     blur.state = .active
     blur.appearance = NSAppearance(named: .darkAqua)

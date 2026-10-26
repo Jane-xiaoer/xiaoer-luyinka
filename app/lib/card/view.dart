@@ -252,7 +252,7 @@ class _CardViewState extends State<CardView> {
                   store.save();
                   setState(() {});
                 },
-                selectedColor: K.cardDeep,
+                selectedColor: K.picked,
                 side: BorderSide(color: K.line),
                 visualDensity: VisualDensity.compact,
               ),
@@ -382,7 +382,7 @@ class _CardViewState extends State<CardView> {
                   selected: _filter == k,
                   onSelected: (_) => setState(() => _filter = k),
                   showCheckmark: false,
-                  selectedColor: K.cardDeep,
+                  selectedColor: K.picked,
                   side: BorderSide(color: K.line),
                   labelStyle: TextStyle(
                     fontSize: 12.5,
@@ -453,8 +453,8 @@ class _CardViewState extends State<CardView> {
                     : '在录音卡里打开',
               ),
               style: FilledButton.styleFrom(
-                backgroundColor: K.ink,
-                foregroundColor: K.card,
+                backgroundColor: K.strong,
+                foregroundColor: K.onStrong,
               ),
             ),
         ];

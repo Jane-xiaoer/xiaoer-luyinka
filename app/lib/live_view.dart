@@ -567,7 +567,7 @@ class _LiveViewState extends State<LiveView> {
         ),
         FilledButton(
           onPressed: busy ? null : _finish,
-          style: FilledButton.styleFrom(backgroundColor: K.accent),
+          style: FilledButton.styleFrom(backgroundColor: K.cta),
           child: const Text('结束并保存'),
         ),
         _systemChip(),
@@ -1018,7 +1018,7 @@ class _VocabDialogState extends State<VocabDialog> {
       TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')),
       FilledButton(
         onPressed: () => Navigator.pop(context, _collect()),
-        style: FilledButton.styleFrom(backgroundColor: K.accent),
+        style: FilledButton.styleFrom(backgroundColor: K.cta),
         child: const Text('保存'),
       ),
     ],
