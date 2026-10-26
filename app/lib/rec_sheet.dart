@@ -121,7 +121,7 @@ class _RecSheetState extends State<RecSheet> {
 
   @override
   Widget build(BuildContext context) => Material(
-    color: K.paper,
+    color: K.panel,
     elevation: 8,
     child: SafeArea(
       child: ListenableBuilder(

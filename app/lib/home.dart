@@ -924,7 +924,7 @@ class Sidebar extends StatelessWidget {
             // Mac 红绿灯压在左上，往下让一点
             padding: EdgeInsets.fromLTRB(16, Platform.isMacOS ? 46 : 20, 12, 16),
             child: Row(children: [
-              const Mascot('stand', size: 34, halo: true),
+              const Mascot('stand', size: 30),
               const SizedBox(width: 8),
               Expanded(child: Text('小耳录音卡', overflow: TextOverflow.ellipsis, style: K.title(17).copyWith(color: K.ink))),
               MeetButton(live: live, selected: mode == 5, onTap: () => onMode(5)),
@@ -988,7 +988,7 @@ class Sidebar extends StatelessWidget {
 
   Widget _rule() => Padding(
         padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 6),
-        child: Divider(height: 1, color: K.lineStrong.withValues(alpha: 0.6)),
+        child: Divider(height: 1, color: K.dark ? K.line : K.lineStrong.withValues(alpha: 0.6)),
       );
 
   /// 录音卡那一行右边的短状态：选卡 / 电量 / 不在旁边
@@ -1085,7 +1085,7 @@ class ModeSwitch extends StatelessWidget {
         );
     return Container(
       padding: const EdgeInsets.all(3),
-      decoration: BoxDecoration(color: K.cardDeep.withValues(alpha: 0.55), borderRadius: BorderRadius.circular(12)),
+      decoration: BoxDecoration(color: K.dark ? K.cardDeep : K.cardDeep.withValues(alpha: 0.55), borderRadius: BorderRadius.circular(12)),
       child: Row(mainAxisSize: compact ? MainAxisSize.min : MainAxisSize.max, children: [seg('按天', 0), seg('按类别', 1), seg('按人', 2)]),
     );
   }

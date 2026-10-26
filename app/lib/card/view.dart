@@ -108,7 +108,7 @@ class _CardViewState extends State<CardView> {
   }) => Container(
     padding: padding,
     decoration: BoxDecoration(
-      color: Colors.white.withValues(alpha: 0.6),
+      color: K.tile,
       borderRadius: BorderRadius.circular(18),
       border: Border.all(color: K.line),
     ),
@@ -454,7 +454,7 @@ class _CardViewState extends State<CardView> {
               ),
               style: FilledButton.styleFrom(
                 backgroundColor: K.ink,
-                foregroundColor: K.paper,
+                foregroundColor: K.card,
               ),
             ),
         ];

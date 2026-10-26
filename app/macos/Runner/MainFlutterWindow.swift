@@ -6,7 +6,26 @@ import FlutterMacOS
 class MainFlutterWindow: NSWindow {
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
-    self.contentViewController = flutterViewController
+    // 毛玻璃底：Flutter 画布透明，后面垫一层系统的模糊（看得到桌面）。少女风整片画了不透明的底色，看不出来；
+    // 深色玻璃皮肤把左栏、窗口底画成透明，就露出这层（像访达的侧栏）。
+    flutterViewController.backgroundColor = .clear
+    let blur = NSVisualEffectView()
+    blur.material = .sidebar
+    blur.blendingMode = .behindWindow
+    blur.state = .active
+    blur.appearance = NSAppearance(named: .darkAqua)
+    let root = NSViewController()
+    root.view = NSView()
+    blur.frame = root.view.bounds
+    blur.autoresizingMask = [.width, .height]
+    root.view.addSubview(blur)
+    root.addChild(flutterViewController)
+    flutterViewController.view.frame = root.view.bounds
+    flutterViewController.view.autoresizingMask = [.width, .height]
+    root.view.addSubview(flutterViewController.view)
+    self.contentViewController = root
+    self.isOpaque = false
+    self.backgroundColor = .clear
     // 默认 1280×820 居中；标题栏透明，App 自己的顶栏就是标题栏（红绿灯压在左上）
     self.setContentSize(NSSize(width: 1280, height: 820))
     self.minSize = NSSize(width: 900, height: 600)

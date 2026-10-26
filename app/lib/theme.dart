@@ -10,6 +10,7 @@ class Skin {
   final Color live, todo, todoSoft, todoBg;
   final bool serifTitle; // 标题用宋体（少女风）还是黑体（简约风）
   final bool cute; // 吉祥物、手绘波浪线、小星星
+  final bool dark; // 深色：系统控件（输入框、菜单、对话框）也按深色画
   final List<(Color, Color)> cats; // 类别标签的（底色, 字色）
   const Skin({
     required this.key,
@@ -32,6 +33,7 @@ class Skin {
     required this.todoBg,
     required this.serifTitle,
     required this.cute,
+    this.dark = false,
     required this.cats,
   });
 }
@@ -68,39 +70,41 @@ const girlSkin = Skin(
   ],
 );
 
-/// 简约风：浅灰底、白卡片、近黑字、一个蓝色强调，没有吉祥物和手绘点缀，标题用黑体。
-const plainSkin = Skin(
-  key: 'plain',
-  name: '简约风',
-  sage: Color(0xFFEDEDEF),
-  card: Color(0xFFFFFFFF),
-  cardDeep: Color(0xFFF4F4F5),
-  line: Color(0xFFE4E4E7),
-  lineStrong: Color(0xFFD4D4D8),
-  ink: Color(0xFF18181B),
-  mute: Color(0xFF52525B),
-  faint: Color(0xFF8A8A93),
-  accent: Color(0xFF2563EB),
-  accentSoft: Color(0xFFE8EFFD),
-  accentEdge: Color(0xFFBFD3FB),
-  blush: Color(0xFFE8EFFD),
-  live: Color(0xFF16A34A),
-  todo: Color(0xFFB45309),
-  todoSoft: Color(0xFFFEF3C7),
-  todoBg: Color(0xFFFFFBEB),
+/// 深色玻璃：照苹果深色模式——左栏和窗口底透明、露出系统的毛玻璃（看得到桌面），内容卡片是深灰半透明，
+/// 白字、苹果蓝强调，没有吉祥物和手绘点缀，标题用黑体。
+const glassSkin = Skin(
+  key: 'glass',
+  name: '深色玻璃',
+  dark: true,
+  sage: Color(0x00000000), // 透明：露出毛玻璃
+  card: Color(0xE61D1D20),
+  cardDeep: Color(0x14FFFFFF),
+  line: Color(0x1FFFFFFF),
+  lineStrong: Color(0x33FFFFFF),
+  ink: Color(0xFFF5F5F7),
+  mute: Color(0xFFC7C7CC),
+  faint: Color(0xFF8E8E93),
+  accent: Color(0xFF0A84FF),
+  accentSoft: Color(0x330A84FF),
+  accentEdge: Color(0x660A84FF),
+  blush: Color(0x260A84FF),
+  live: Color(0xFF30D158),
+  todo: Color(0xFFFF9F0A),
+  todoSoft: Color(0x33FF9F0A),
+  todoBg: Color(0x1AFF9F0A),
   serifTitle: false,
   cute: false,
   cats: [
-    (Color(0xFFF1F5F9), Color(0xFF334155)),
-    (Color(0xFFEFF6FF), Color(0xFF1D4ED8)),
-    (Color(0xFFFEF3C7), Color(0xFF92400E)),
-    (Color(0xFFECFDF5), Color(0xFF047857)),
-    (Color(0xFFF5F3FF), Color(0xFF6D28D9)),
-    (Color(0xFFFFF1F2), Color(0xFFBE123C)),
+    (Color(0x2EFFFFFF), Color(0xFFE5E5EA)),
+    (Color(0x330A84FF), Color(0xFF64D2FF)),
+    (Color(0x33FF9F0A), Color(0xFFFFD60A)),
+    (Color(0x3330D158), Color(0xFF30D158)),
+    (Color(0x33BF5AF2), Color(0xFFDA8FFF)),
+    (Color(0x33FF375F), Color(0xFFFF6482)),
   ],
 );
 
-const skins = [girlSkin, plainSkin];
+const skins = [girlSkin, glassSkin];
 
 /// 现在用的皮肤（App 根上听它，一换整个界面重画）。
 final skin = ValueNotifier<Skin>(girlSkin);
@@ -126,6 +130,12 @@ class K {
   static Color get todoSoft => _s.todoSoft;
   static Color get todoBg => _s.todoBg;
   static bool get cute => _s.cute;
+  static bool get dark => _s.dark;
+  /// 设备页那几块：少女风是半透明白，深色玻璃是一层很淡的亮
+  static Color get tile => _s.dark ? _s.cardDeep : Colors.white.withValues(alpha: 0.6);
+
+  /// 浮在上面的整块面板（右边滑出的详情、交给 Agent）：少女风用底色，深色玻璃用不透明深灰（透明的话后面会透出来）
+  static Color get panel => _s.dark ? const Color(0xF52A2A2D) : _s.sage;
   static const sans = ['PingFang SC', 'Noto Sans CJK SC', 'Noto Sans SC', 'sans-serif'];
   static const serif = ['Songti SC', 'Noto Serif CJK SC', 'Noto Serif SC', 'serif'];
 
@@ -141,14 +151,28 @@ class K {
 ThemeData buildTheme() {
   final base = ThemeData(
     useMaterial3: true,
-    colorScheme: ColorScheme.fromSeed(seedColor: K.accent, surface: K.paper, primary: K.accent),
+    colorScheme: ColorScheme.fromSeed(
+      seedColor: K.accent,
+      brightness: K.dark ? Brightness.dark : Brightness.light,
+      surface: K.dark ? K.card : K.paper,
+      primary: K.accent,
+      onPrimary: Colors.white,
+    ),
     scaffoldBackgroundColor: K.paper,
     fontFamilyFallback: K.sans,
     dividerColor: K.line,
   );
   return base.copyWith(
     textTheme: base.textTheme.apply(bodyColor: K.ink, displayColor: K.ink, fontFamilyFallback: K.sans),
-    inputDecorationTheme: const InputDecorationTheme(border: InputBorder.none, isDense: true),
+    inputDecorationTheme: InputDecorationTheme(
+      border: InputBorder.none,
+      isDense: true,
+      hintStyle: TextStyle(color: K.faint),
+      labelStyle: TextStyle(color: K.mute),
+    ),
+    textSelectionTheme: TextSelectionThemeData(cursorColor: K.accent, selectionColor: K.accent.withValues(alpha: 0.3)),
+    popupMenuTheme: PopupMenuThemeData(color: K.dark ? const Color(0xFF2C2C2E) : K.card),
+    dialogTheme: DialogThemeData(backgroundColor: K.dark ? const Color(0xF22C2C2E) : K.card),
   );
 }
 

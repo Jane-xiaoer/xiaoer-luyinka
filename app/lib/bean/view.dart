@@ -161,7 +161,7 @@ class _BeanViewState extends State<BeanView> {
   }) => Container(
     padding: padding,
     decoration: BoxDecoration(
-      color: Colors.white.withValues(alpha: 0.6),
+      color: K.tile,
       borderRadius: BorderRadius.circular(18),
       border: Border.all(color: K.line),
     ),
@@ -695,7 +695,7 @@ class _BeanViewState extends State<BeanView> {
           onPressed: () => bean.moveIn(f),
           style: FilledButton.styleFrom(
             backgroundColor: K.ink,
-            foregroundColor: K.paper,
+            foregroundColor: K.card,
             visualDensity: VisualDensity.compact,
           ),
           child: const Text('导入录音卡'),
@@ -750,7 +750,7 @@ class _BeanViewState extends State<BeanView> {
     );
     final dark = FilledButton.styleFrom(
       backgroundColor: K.ink,
-      foregroundColor: K.paper,
+      foregroundColor: K.card,
     );
     openRecSheet(
       context,

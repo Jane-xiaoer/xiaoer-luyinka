@@ -140,7 +140,7 @@ class _Dest extends StatelessWidget {
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.only(bottom: 8),
         child: Material(
-          color: K.paper,
+          color: K.panel,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: K.line)),
           child: ListTile(
             minTileHeight: 60,
