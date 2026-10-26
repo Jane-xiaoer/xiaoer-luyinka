@@ -200,7 +200,7 @@ class _RecSheetState extends State<RecSheet> {
                   child: Row(
                     children: [
                       IconButton.filled(
-                        style: IconButton.styleFrom(backgroundColor: K.strong),
+                        style: IconButton.styleFrom(backgroundColor: K.dark ? K.accent : K.ink),
                         tooltip: mine && _player.playing ? '暂停' : '播放原声',
                         onPressed: () => mine ? _player.toggle() : _play(0),
                         icon: Icon(

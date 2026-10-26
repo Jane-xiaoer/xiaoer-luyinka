@@ -11,6 +11,7 @@ class Skin {
   final bool serifTitle; // 标题用宋体（少女风）还是黑体（简约风）
   final bool cute; // 吉祥物、手绘波浪线、小星星
   final bool dark; // 深色：系统控件（输入框、菜单、对话框）也按深色画
+  final Color glow; // 深色壁纸上左栏那一溜光的颜色（跟主色同一个色系，不然花）
   final List<(Color, Color)> cats; // 类别标签的（底色, 字色）
   const Skin({
     required this.key,
@@ -34,6 +35,7 @@ class Skin {
     required this.serifTitle,
     required this.cute,
     this.dark = false,
+    this.glow = const Color(0x00000000),
     required this.cats,
   });
 }
@@ -74,8 +76,9 @@ const girlSkin = Skin(
 /// 白字、苹果蓝强调，没有吉祥物和手绘点缀，标题用黑体。
 const glassSkin = Skin(
   key: 'glass',
-  name: '深色玻璃',
+  name: '深色 · 蓝',
   dark: true,
+  glow: Color(0xFF1E6BFF),
   sage: Color(0x1A000000), // 左栏、窗口底：几乎透明，底下的蓝光透上来
   card: Color(0xB30B0E15), // 内容面板：半透明近黑（带一点蓝）+ 背后模糊 = 磨砂玻璃
   cardDeep: Color(0x12FFFFFF),
@@ -88,6 +91,39 @@ const glassSkin = Skin(
   accentSoft: Color(0x330A84FF),
   accentEdge: Color(0x660A84FF),
   blush: Color(0x260A84FF),
+  live: Color(0xFF64D2FF), // 状态也用蓝青，不跟绿色混
+  todo: Color(0xFFFF9F0A),
+  todoSoft: Color(0x33FF9F0A),
+  todoBg: Color(0x1AFF9F0A),
+  serifTitle: false,
+  cute: false,
+  cats: [
+    (Color(0x2EFFFFFF), Color(0xFFE5E5EA)),
+    (Color(0x330A84FF), Color(0xFF64D2FF)),
+    (Color(0x33FF9F0A), Color(0xFFFFD60A)),
+    (Color(0x3330D158), Color(0xFF30D158)),
+    (Color(0x33BF5AF2), Color(0xFFDA8FFF)),
+    (Color(0x33FF375F), Color(0xFFFF6482)),
+  ],
+);
+
+const glassGreenSkin = Skin(
+  key: 'glassGreen',
+  name: '深色 · 绿',
+  dark: true,
+  glow: Color(0xFF1FB86A),
+  sage: Color(0x1A000000), // 左栏、窗口底：几乎透明，底下的蓝光透上来
+  card: Color(0xB30A0F0C), // 内容面板：半透明近黑（带一点绿）+ 背后模糊 = 磨砂玻璃
+  cardDeep: Color(0x12FFFFFF),
+  line: Color(0x1FFFFFFF),
+  lineStrong: Color(0x33FFFFFF),
+  ink: Color(0xFFF5F5F7),
+  mute: Color(0xFFC7C7CC),
+  faint: Color(0xFF8E8E93),
+  accent: Color(0xFF30C46F),
+  accentSoft: Color(0x3330C46F),
+  accentEdge: Color(0x6630C46F),
+  blush: Color(0x2630C46F),
   live: Color(0xFF30D158),
   todo: Color(0xFFFF9F0A),
   todoSoft: Color(0x33FF9F0A),
@@ -104,7 +140,7 @@ const glassSkin = Skin(
   ],
 );
 
-const skins = [girlSkin, glassSkin];
+const skins = [girlSkin, glassSkin, glassGreenSkin];
 
 /// 现在用的皮肤（App 根上听它，一换整个界面重画）。
 final skin = ValueNotifier<Skin>(girlSkin);
@@ -132,12 +168,12 @@ class K {
   static bool get cute => _s.cute;
   static bool get dark => _s.dark;
   /// 主按钮的底：少女风珊瑚粉，深色玻璃是半透明苹果蓝
-  static Color get cta => _s.dark ? const Color(0xD90A84FF) : _s.accent;
+  static Color get cta => _s.dark ? Colors.transparent : _s.accent; // 深色：底由玻璃按钮自己画（带主色）
   /// 深色实心按钮（交给 Agent、导入录音卡、播放）：少女风墨色底 + 米白字；深色玻璃是磨砂白玻璃 + 白字
-  static Color get strong => _s.dark ? const Color(0x2EFFFFFF) : _s.ink;
+  static Color get strong => _s.dark ? Colors.transparent : _s.ink; // 深色：底由玻璃按钮自己画
   static Color get onStrong => _s.dark ? _s.ink : _s.card;
   /// 选中的筛选标签
-  static Color get picked => _s.dark ? const Color(0x400A84FF) : _s.cardDeep;
+  static Color get picked => _s.dark ? _s.accentSoft : _s.cardDeep;
 
   /// 设备页那几块：少女风是半透明白，深色玻璃是一层很淡的亮
   static Color get tile => _s.dark ? _s.cardDeep : Colors.white.withValues(alpha: 0.6);
@@ -185,25 +221,28 @@ ThemeData buildTheme() {
     outlinedButtonTheme: K.dark
         ? OutlinedButtonThemeData(
             style: OutlinedButton.styleFrom(
-              backgroundColor: const Color(0x1AFFFFFF),
+              backgroundColor: Colors.transparent,
               foregroundColor: K.ink,
-              side: const BorderSide(color: Color(0x33FFFFFF)),
+              side: BorderSide.none,
+              shape: const StadiumBorder(),
+              backgroundBuilder: glassBg(),
             ),
           )
         : null,
     filledButtonTheme: K.dark
         ? FilledButtonThemeData(
             style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xD90A84FF),
+              backgroundColor: Colors.transparent,
               foregroundColor: Colors.white,
-              side: const BorderSide(color: Color(0x40FFFFFF)),
+              shape: const StadiumBorder(),
+              backgroundBuilder: glassBg(tint: K.accent),
             ),
           )
         : null,
     chipTheme: K.dark
         ? ChipThemeData(
             backgroundColor: const Color(0x14FFFFFF),
-            selectedColor: const Color(0x400A84FF),
+            selectedColor: K.accentSoft,
             side: const BorderSide(color: Color(0x26FFFFFF)),
             labelStyle: TextStyle(color: K.ink),
           )
@@ -358,29 +397,32 @@ String duration(Duration d) {
   return h > 0 ? '$h 小时 $m 分' : (d.inMinutes > 0 ? '${d.inMinutes} 分钟' : '${d.inSeconds} 秒');
 }
 
-/// 深色玻璃的壁纸：几乎全黑，左栏那一溜透出科技蓝的光（像屏幕边上打了一道蓝光），右下角再淡淡一点蓝，别的地方都是黑。
+/// 深色玻璃的壁纸：几乎全黑，左栏那一溜透出主色的光（像屏幕边上打了一道光），右下角再淡淡一点，别的地方都是黑。
 class GlassBackdrop extends StatelessWidget {
   const GlassBackdrop({super.key});
 
   @override
-  Widget build(BuildContext context) => DecoratedBox(
+  Widget build(BuildContext context) {
+    final glow = skin.value.glow;
+    return DecoratedBox(
         decoration: const BoxDecoration(color: Color(0xFF04060B)),
         child: Stack(fit: StackFit.expand, children: [
           // 左栏一溜蓝：从最左边往右慢慢淡掉，到左栏边上就没了
-          const DecoratedBox(
+          DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.centerLeft,
-                end: Alignment(-0.45, 0),
-                colors: [Color(0x591E6BFF), Color(0x1F0A84FF), Color(0x0004060B)],
-                stops: [0, 0.55, 1],
+                end: const Alignment(-0.45, 0),
+                colors: [glow.withValues(alpha: 0.35), glow.withValues(alpha: 0.12), const Color(0x0004060B)],
+                stops: const [0, 0.55, 1],
               ),
             ),
           ),
-          const _Glow(Alignment(-1.0, -0.35), Color(0xFF1E6BFF), 0.75), // 左栏中上：一团亮一点的蓝
-          const _Glow(Alignment(1.15, 1.2), Color(0xFF0A84FF), 0.7), // 右下：很淡的蓝
+          _Glow(const Alignment(-1.0, -0.35), glow, 0.75), // 左栏中上：一团亮一点的
+          _Glow(const Alignment(1.15, 1.2), glow, 0.7), // 右下：很淡的
         ]),
       );
+  }
 }
 
 class _Glow extends StatelessWidget {
@@ -398,4 +440,49 @@ class _Glow extends StatelessWidget {
           ),
         ),
       );
+}
+
+/// 玻璃按钮的底（深色皮肤用；少女风返回 null 照旧）：上亮下暗的渐变 + 顶边一道高光 + 一圈细亮边。
+/// [tint] 给了就是带颜色的玻璃（主按钮），外面再晕一圈同色的光。
+ButtonLayerBuilder? glassBg({Color? tint}) {
+  if (!K.dark) return null;
+  return (context, states, child) {
+    final off = states.contains(WidgetState.disabled);
+    final down = states.contains(WidgetState.pressed);
+    final hover = states.contains(WidgetState.hovered);
+    final top = tint == null
+        ? Colors.white.withValues(alpha: off ? 0.05 : (hover ? 0.20 : 0.15))
+        : Color.lerp(tint, Colors.white, 0.18)!.withValues(alpha: off ? 0.25 : (down ? 0.7 : 0.92));
+    final bottom = tint == null
+        ? Colors.white.withValues(alpha: off ? 0.02 : (down ? 0.10 : 0.05))
+        : tint.withValues(alpha: off ? 0.15 : (down ? 0.55 : 0.72));
+    return DecoratedBox(
+      decoration: ShapeDecoration(
+        shape: StadiumBorder(side: BorderSide(color: Colors.white.withValues(alpha: off ? 0.08 : 0.22))),
+        gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [top, bottom]),
+        shadows: tint == null || off
+            ? const [BoxShadow(color: Color(0x40000000), blurRadius: 8, offset: Offset(0, 3))]
+            : [BoxShadow(color: tint.withValues(alpha: 0.35), blurRadius: 14, offset: const Offset(0, 4))],
+      ),
+      child: Stack(alignment: Alignment.center, children: [
+        if (child != null) child,
+        // 顶边那道高光：中间亮、两头淡
+        Positioned(
+          top: 1,
+          left: 14,
+          right: 14,
+          child: Container(
+            height: 1,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(colors: [
+                Colors.white.withValues(alpha: 0),
+                Colors.white.withValues(alpha: off ? 0.1 : 0.45),
+                Colors.white.withValues(alpha: 0),
+              ]),
+            ),
+          ),
+        ),
+      ]),
+    );
+  };
 }

@@ -265,7 +265,7 @@ class _BeanViewState extends State<BeanView> {
                   size: 18,
                 ),
                 label: Text(recording ? '停止录音' : '开始录音'),
-                style: FilledButton.styleFrom(backgroundColor: K.live),
+                style: FilledButton.styleFrom(backgroundColor: K.dark ? null : K.live),
               ),
               OutlinedButton.icon(
                 onPressed: canAct && files.any(bean.pullable)

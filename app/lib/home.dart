@@ -2786,7 +2786,7 @@ class PlayerBar extends StatelessWidget {
           decoration: BoxDecoration(color: K.bar, border: Border(top: BorderSide(color: K.line))),
           child: Row(children: [
             IconButton.filled(
-              style: IconButton.styleFrom(backgroundColor: K.strong),
+              style: IconButton.styleFrom(backgroundColor: K.dark ? K.accent : K.ink),
               tooltip: player.playing ? '暂停' : '播放',
               onPressed: player.toggle,
               icon: Icon(player.playing ? Icons.pause : Icons.play_arrow, color: Colors.white),
