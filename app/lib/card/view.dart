@@ -97,12 +97,6 @@ class _CardViewState extends State<CardView> {
           ],
           const SizedBox(height: 14),
           _list(context, recs),
-          const SizedBox(height: 12),
-          Text(
-            '卡一靠近就自动拉下来、转写、按类别整理进录音卡，不用点。点开一条能看全文、听原声。'
-            '导入好了的，设置里打开「导入后从卡上删」就会自动从卡上删掉，给卡腾地方。',
-            style: TextStyle(color: K.faint, fontSize: 12, height: 1.7),
-          ),
         ],
       );
     },
@@ -417,7 +411,7 @@ class _CardViewState extends State<CardView> {
   }
 
   (String, Color, double?) _state(Rec r) => switch (r.stage) {
-    'card' => ('在卡上，靠近就自动拉', K.faint, null),
+    'card' => ('在卡上', K.faint, null),
     'pulling' => (
       pullLine(r),
       K.todo,
@@ -427,8 +421,8 @@ class _CardViewState extends State<CardView> {
     'processing' => ('云端转写 ${r.progress}%', K.todo, r.progress / 100),
     'transcribed' => (r.error ?? '等着整理', K.todo, null),
     'analyzing' => ('整理中 ${r.progress}%', K.todo, r.progress / 100),
-    'done' => (_onCard(r) ? '已导入录音卡 · 卡上还留着' : '已导入录音卡 · 卡上已删', K.live, null),
-    _ => ('出错了，稍后自动再试${r.error == null ? '' : '：${r.error}'}', K.accent, null),
+    'done' => (_onCard(r) ? '已导入 · 卡上还留着' : '已导入', K.live, null),
+    _ => ('出错了，稍后再试', K.accent, null),
   };
 
   void _open(BuildContext context, Rec r) {

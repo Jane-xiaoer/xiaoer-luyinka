@@ -69,16 +69,16 @@ void main() {
 
     expect(find.text('等着连…'), findsWidgets);
     expect(find.text('空录音，不拉'), findsNothing); // 空录音不显示
-    expect(find.text('只在豆子里'), findsOneWidget);
+    expect(find.text('还没拉'), findsOneWidget);
     expect(find.textContaining('拉取中 50%'), findsOneWidget);
     expect(find.text('云端转写 42%'), findsOneWidget);
     expect(
-      find.textContaining('原稿或转写不全，先别删'),
+      find.textContaining('原稿不全，先别删'),
       findsOneWidget,
     ); // done 但没有原稿文件：不算已存好
     expect(find.text('录完再拉'), findsOneWidget);
-    expect(find.text('拉下来看看'), findsOneWidget); // 只有「只在豆子里」那条有这个按钮
-    expect(find.textContaining('已存好 0 · 处理中 3 · 只在豆子里 1'), findsOneWidget);
+    expect(find.text('拉下来看看'), findsOneWidget); // 只有「还没拉」那条有这个按钮
+    expect(find.textContaining(RegExp(r'^还没拉 \d+$')), findsOneWidget); // 筛选那排带数
     expect(find.text('设备上的录音'), findsOneWidget);
     bean.dispose();
   });

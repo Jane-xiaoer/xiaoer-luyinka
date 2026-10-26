@@ -115,6 +115,13 @@ class _HomeState extends State<Home> {
       if (mounted) setState(() {});
     };
     WidgetsBinding.instance.addPostFrameCallback((_) => _askOwnKey());
+    // 截图 / 自检用：LUYINKA_START_MODE=7 打开就进录音卡页（6 录音豆、5 现场会议、3 待办…）；SETTINGS=1 打开设置
+    final m = int.tryParse(Platform.environment['LUYINKA_START_MODE'] ?? '');
+    if (m != null) _mode = m;
+    final sec = Platform.environment['LUYINKA_START_SETTINGS'];
+    if (sec != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => showSettings(context, store, widget.syncer, section: sec));
+    }
     store.addListener(_onStore);
   }
 
@@ -1998,8 +2005,7 @@ class AskBoxState extends State<AskBox> {
           Padding(
             padding: EdgeInsets.fromLTRB(20, 8, 20, 0),
             child: Text(
-              '整理和问答现在用的是小耳的体验额度（每天有限）。在左下角「设置」里填你自己的模型 key（DeepSeek 等），'
-              '或让你的 AI 照资料文件夹里的「给AI的接口.md」帮你接上。',
+              '在用小耳的体验额度（每天有限）· 设置 → 大模型 里填你自己的 key',
               style: TextStyle(fontSize: 12, color: K.faint, height: 1.5),
             ),
           ),

@@ -425,9 +425,7 @@ class _LiveViewState extends State<LiveView> {
             Text('现场会议', style: K.title(24)),
             const SizedBox(height: 10),
             Text(
-              '用这台设备的麦克风边听边出原话。左边是原话，右边记你自己的笔记：'
-              '点一句原话、或者选中一段，就能挪进笔记，不用打字。\n记完点「顺一下」，小耳对照原话帮你把笔记理顺。'
-              '\n结束后整场收进录音卡，跟卡上的录音一样切场景、出纪要。',
+              '边听边出原话，右边记笔记；双击一句原话就挪进笔记。',
               textAlign: TextAlign.center,
               style: TextStyle(color: K.mute, height: 1.7),
             ),
@@ -457,7 +455,7 @@ class _LiveViewState extends State<LiveView> {
             TextButton.icon(
               onPressed: _openVocab,
               icon: Icon(Icons.menu_book_outlined, size: 17, color: K.mute),
-              label: Text('词汇表：开会前先把常被听错的词填好', style: TextStyle(color: K.mute)),
+              label: Text('词汇表', style: TextStyle(color: K.mute)),
             ),
           ],
         ),

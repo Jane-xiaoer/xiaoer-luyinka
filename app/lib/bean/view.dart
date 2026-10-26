@@ -99,12 +99,6 @@ class _BeanViewState extends State<BeanView> {
           ],
           const SizedBox(height: 14),
           _list(context, files),
-          const SizedBox(height: 12),
-          Text(
-            '先「拉下来看看」：拉到电脑、转成文字，点开就能看全文、听原声，再决定导入录音卡还是不要。'
-            '导入了的，录音卡里原稿和转写都存好，才能把豆子上的删掉。蓝牙拉得慢，长录音要多等一会儿，断了下次接着拉。',
-            style: TextStyle(color: K.faint, fontSize: 12, height: 1.7),
-          ),
         ],
       );
     },
@@ -476,7 +470,7 @@ class _BeanViewState extends State<BeanView> {
             const Spacer(),
             Flexible(
               child: Text(
-                _summary(files),
+                bean.listedAt == null ? '' : '读于 ${_hm(bean.listedAt!)}',
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(color: K.mute, fontSize: 12),
               ),
@@ -528,25 +522,6 @@ class _BeanViewState extends State<BeanView> {
       ],
     ),
   );
-
-  String _summary(List<BeanFile> files) {
-    var saved = 0, going = 0, only = 0, review = 0;
-    for (final f in files) {
-      if (f.recording) continue;
-      if (bean.savedSafely(f)) {
-        saved++;
-      } else if (bean.reviewing(f)) {
-        review++;
-      } else if (beanStep(bean.recOf(f)) == 0) {
-        only++;
-      } else {
-        going++;
-      }
-    }
-    final at = bean.listedAt;
-    return '已存好 $saved${review > 0 ? ' · 待你决定 $review' : ''} · 处理中 $going · 只在豆子里 $only'
-        '${at == null ? '' : ' · ${at.month}/${at.day} ${_hm(at)} 读的'}';
-  }
 
   Widget _row(BuildContext context, BeanFile f) {
     final r = bean.recOf(f);
@@ -652,12 +627,12 @@ class _BeanViewState extends State<BeanView> {
     if (f.recording) return ('录完再拉', K.accent, null);
     if (bean.savedSafely(f)) {
       final n = store.scenesOf(f.stem).where((s) => !s.noise).length;
-      return ('已存好：原稿 + 转写${n > 0 ? ' · 整理成 $n 段' : ''}，可以从豆子上删', K.live, null);
+      return ('已导入${n > 1 ? ' · $n 段' : ''}', K.live, null);
     }
     switch (r?.stage) {
       case null:
         return (
-          bean.queued(f) ? '排队中，连上就拉' : '只在豆子里',
+          bean.queued(f) ? '排队中' : '还没拉',
           bean.queued(f) ? K.todo : K.faint,
           null,
         );
@@ -673,16 +648,16 @@ class _BeanViewState extends State<BeanView> {
       case 'processing':
         return ('云端转写 ${r!.progress}%', K.todo, r.progress / 100);
       case 'review':
-        return ('拉下来了：看看文字，决定导入录音卡还是不要', K.ink, null);
+        return ('待你决定', K.ink, null);
       case 'transcribed':
         return ('等着整理', K.todo, null);
       case 'analyzing':
         return ('整理中 ${r!.progress}%', K.todo, r.progress / 100);
       case 'done':
-        return ('整理好了，但录音卡里的原稿或转写不全，先别删', K.accent, null);
+        return ('原稿不全，先别删', K.accent, null);
       default:
         return (
-          '出错了，稍后自动再试${r?.error == null ? '' : '：${r!.error}'}',
+          '出错了，稍后再试',
           K.accent,
           null,
         );
