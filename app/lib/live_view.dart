@@ -184,20 +184,20 @@ class _LiveViewState extends State<LiveView> {
                 ),
                 const SizedBox(width: 10),
                 Expanded(child: Text(p)),
-                if (p == current) const Icon(Icons.check_rounded, size: 16, color: K.accent),
+                if (p == current) Icon(Icons.check_rounded, size: 16, color: K.accent),
               ],
             ),
           ),
         if (live.people.isNotEmpty) const PopupMenuDivider(),
         const PopupMenuItem(value: 'new', height: 38, child: Text('新的人…')),
         if (live.voices.names.isNotEmpty)
-          const PopupMenuItem(
+          PopupMenuItem(
             value: 'manage',
             height: 38,
             child: Text('认得的人…', style: TextStyle(color: K.mute)),
           ),
         if (idx.any((i) => live.lines[i].speaker != null))
-          const PopupMenuItem(
+          PopupMenuItem(
             value: 'clear',
             height: 38,
             child: Text('不知道是谁', style: TextStyle(color: K.mute)),
@@ -237,7 +237,7 @@ class _LiveViewState extends State<LiveView> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Text(
+              Text(
                 '标错了（比如一句话里混着两个人，却标给了一个人），就把这个人忘掉，再挑他自己说的清楚的长句重新标。',
                 style: TextStyle(color: K.mute, fontSize: 13, height: 1.6),
               ),
@@ -254,18 +254,18 @@ class _LiveViewState extends State<LiveView> {
                     Expanded(child: Text(n)),
                     Text(
                       '亲标 ${live.voices.manualCount(n)} 句${live.voices.autoCount(n) > 0 ? ' · 自己学了 ${live.voices.autoCount(n)} 句' : ''}',
-                      style: const TextStyle(color: K.faint, fontSize: 12),
+                      style: TextStyle(color: K.faint, fontSize: 12),
                     ),
                     TextButton(
                       onPressed: () {
                         live.forgetVoice(n);
                         set(() {});
                       },
-                      child: const Text('忘掉', style: TextStyle(color: K.accent)),
+                      child: Text('忘掉', style: TextStyle(color: K.accent)),
                     ),
                   ],
                 ),
-              if (live.voices.names.isEmpty) const Text('现在一个都不认得。', style: TextStyle(color: K.faint)),
+              if (live.voices.names.isEmpty) Text('现在一个都不认得。', style: TextStyle(color: K.faint)),
             ],
           ),
         ),
@@ -290,7 +290,7 @@ class _LiveViewState extends State<LiveView> {
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
           TextButton(
             onPressed: () => Navigator.pop(ctx, c.text),
-            child: const Text('好', style: TextStyle(color: K.accent)),
+            child: Text('好', style: TextStyle(color: K.accent)),
           ),
         ],
       ),
@@ -368,7 +368,7 @@ class _LiveViewState extends State<LiveView> {
           TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('不放弃')),
           TextButton(
             onPressed: () => Navigator.pop(c, true),
-            child: const Text('放弃', style: TextStyle(color: K.accent)),
+            child: Text('放弃', style: TextStyle(color: K.accent)),
           ),
         ],
       ),
@@ -386,14 +386,14 @@ class _LiveViewState extends State<LiveView> {
         SizedBox(height: widget.top),
         _header(wide),
         if (live.status != null) _statusLine(),
-        const Divider(height: 1, color: K.line),
+        Divider(height: 1, color: K.line),
         Expanded(
           child: wide
               ? Row(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     SizedBox(width: (MediaQuery.sizeOf(context).width * 0.34).clamp(320, 460).toDouble(), child: _transcript()),
-                    const VerticalDivider(width: 1, color: K.line),
+                    VerticalDivider(width: 1, color: K.line),
                     Expanded(child: _notesPane()),
                   ],
                 )
@@ -401,7 +401,7 @@ class _LiveViewState extends State<LiveView> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     Expanded(flex: 2, child: _transcript()),
-                    const Divider(height: 1, color: K.line),
+                    Divider(height: 1, color: K.line),
                     Expanded(flex: 3, child: _notesPane()),
                   ],
                 ),
@@ -424,7 +424,7 @@ class _LiveViewState extends State<LiveView> {
             const SizedBox(height: 18),
             Text('现场会议', style: K.title(24)),
             const SizedBox(height: 10),
-            const Text(
+            Text(
               '用这台设备的麦克风边听边出原话。左边是原话，右边记你自己的笔记：'
               '点一句原话、或者选中一段，就能挪进笔记，不用打字。\n记完点「顺一下」，小耳对照原话帮你把笔记理顺。'
               '\n结束后整场收进录音卡，跟卡上的录音一样切场景、出纪要。',
@@ -433,7 +433,7 @@ class _LiveViewState extends State<LiveView> {
             ),
             const SizedBox(height: 22),
             if (live.lastSaved != null)
-              const Padding(
+              Padding(
                 padding: EdgeInsets.only(bottom: 14),
                 child: Text(
                   '上一场已经收进录音卡，正在整理。',
@@ -456,8 +456,8 @@ class _LiveViewState extends State<LiveView> {
             const SizedBox(height: 10),
             TextButton.icon(
               onPressed: _openVocab,
-              icon: const Icon(Icons.menu_book_outlined, size: 17, color: K.mute),
-              label: const Text('词汇表：开会前先把常被听错的词填好', style: TextStyle(color: K.mute)),
+              icon: Icon(Icons.menu_book_outlined, size: 17, color: K.mute),
+              label: Text('词汇表：开会前先把常被听错的词填好', style: TextStyle(color: K.mute)),
             ),
           ],
         ),
@@ -514,7 +514,7 @@ class _LiveViewState extends State<LiveView> {
   Widget _statusText() => Text(
     live.status!,
     textAlign: TextAlign.center,
-    style: const TextStyle(color: K.accent, height: 1.6),
+    style: TextStyle(color: K.accent, height: 1.6),
   );
 
   Widget _statusLine() => Container(
@@ -533,7 +533,7 @@ class _LiveViewState extends State<LiveView> {
         Expanded(
           child: Text(
             live.progress == null ? live.status! : '${live.status!}  ${(live.progress! * 100).round()}%',
-            style: const TextStyle(color: K.ink, fontSize: 13),
+            style: TextStyle(color: K.ink, fontSize: 13),
           ),
         ),
       ],
@@ -565,7 +565,7 @@ class _LiveViewState extends State<LiveView> {
           label: Text(rec ? '暂停' : '接着录'),
           style: OutlinedButton.styleFrom(
             foregroundColor: K.ink,
-            side: const BorderSide(color: K.lineStrong),
+            side: BorderSide(color: K.lineStrong),
           ),
         ),
         FilledButton(
@@ -577,19 +577,19 @@ class _LiveViewState extends State<LiveView> {
         if (live.state == LiveState.paused)
           TextButton(
             onPressed: _discard,
-            child: const Text('放弃', style: TextStyle(color: K.faint)),
+            child: Text('放弃', style: TextStyle(color: K.faint)),
           ),
         IconButton(
           tooltip: '词汇表：常被听错的词',
           onPressed: _openVocab,
-          icon: const Icon(Icons.menu_book_outlined, size: 20, color: K.mute),
+          icon: Icon(Icons.menu_book_outlined, size: 20, color: K.mute),
         ),
       ],
     );
     final title = TextField(
       controller: _title,
       style: K.title(wide ? 20 : 18),
-      decoration: const InputDecoration(
+      decoration: InputDecoration(
         hintText: '会议标题',
         hintStyle: TextStyle(color: K.faint),
       ),
@@ -659,7 +659,7 @@ class _LiveViewState extends State<LiveView> {
                   padding: const EdgeInsets.all(24),
                   child: Text(
                     live.state == LiveState.recording ? '在听…说完一句，这里就出字' : '还没有原话',
-                    style: const TextStyle(color: K.faint),
+                    style: TextStyle(color: K.faint),
                   ),
                 ),
               )
@@ -773,7 +773,7 @@ class _LiveViewState extends State<LiveView> {
               padding: const EdgeInsets.only(top: 9, right: 10),
               child: Text(
                 hm,
-                style: const TextStyle(fontSize: 11.5, color: K.faint, fontFeatures: [FontFeature.tabularFigures()]),
+                style: TextStyle(fontSize: 11.5, color: K.faint, fontFeatures: [FontFeature.tabularFigures()]),
               ),
             ),
           ),
@@ -819,7 +819,7 @@ class _LiveViewState extends State<LiveView> {
       children: [
         Text(
           t,
-          style: const TextStyle(fontWeight: FontWeight.w700, color: K.mute, fontSize: 13, letterSpacing: 1),
+          style: TextStyle(fontWeight: FontWeight.w700, color: K.mute, fontSize: 13, letterSpacing: 1),
         ),
         if (hint != null) ...[
           const SizedBox(width: 10),
@@ -827,7 +827,7 @@ class _LiveViewState extends State<LiveView> {
             child: Text(
               hint,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: K.faint, fontSize: 12),
+              style: TextStyle(color: K.faint, fontSize: 12),
             ),
           ),
         ],
@@ -848,7 +848,7 @@ class _LiveViewState extends State<LiveView> {
         trailing: IconButton(
           tooltip: '复制笔记',
           visualDensity: VisualDensity.compact,
-          icon: const Icon(Icons.copy_rounded, size: 17, color: K.mute),
+          icon: Icon(Icons.copy_rounded, size: 17, color: K.mute),
           onPressed: _copyNotes,
         ),
       ),
@@ -861,8 +861,8 @@ class _LiveViewState extends State<LiveView> {
             maxLines: null,
             expands: true,
             textAlignVertical: TextAlignVertical.top,
-            style: const TextStyle(fontSize: 15, height: 1.7, color: K.ink),
-            decoration: const InputDecoration(
+            style: TextStyle(fontSize: 15, height: 1.7, color: K.ink),
+            decoration: InputDecoration(
               hintText: '边听边记。双击左边一句原话、或者选中一段，就挪到这里。',
               hintStyle: TextStyle(color: K.faint, height: 1.7),
             ),
@@ -893,10 +893,10 @@ class _LiveViewState extends State<LiveView> {
           child: TextField(
             controller: _ask,
             enabled: !_polishing,
-            style: const TextStyle(fontSize: 14, color: K.ink),
+            style: TextStyle(fontSize: 14, color: K.ink),
             decoration: InputDecoration(
               hintText: _polishing ? '小耳在对照原话理你的笔记…' : '跟小耳说怎么改，不说就按模板顺一下（比如：按议题分，最后列待办）',
-              hintStyle: const TextStyle(color: K.faint, fontSize: 13),
+              hintStyle: TextStyle(color: K.faint, fontSize: 13),
             ),
             onSubmitted: (_) => _polish(),
           ),
@@ -904,7 +904,7 @@ class _LiveViewState extends State<LiveView> {
         if (_undo != null && !_polishing)
           TextButton(
             onPressed: _revert,
-            child: const Text('撤回', style: TextStyle(color: K.mute)),
+            child: Text('撤回', style: TextStyle(color: K.mute)),
           ),
         const SizedBox(width: 4),
         FilledButton(
@@ -916,23 +916,6 @@ class _LiveViewState extends State<LiveView> {
         ),
       ],
     ),
-  );
-}
-
-/// 侧栏上「现场会议」那一行右边的小红点：正在录 / 有没收的会。
-class LiveDot extends StatelessWidget {
-  final LiveSession live;
-  const LiveDot({super.key, required this.live});
-  @override
-  Widget build(BuildContext context) => ListenableBuilder(
-    listenable: live,
-    builder: (_, _) => !live.active
-        ? const SizedBox()
-        : Container(
-            width: 8,
-            height: 8,
-            decoration: BoxDecoration(color: live.state == LiveState.recording ? K.accent : K.faint, shape: BoxShape.circle),
-          ),
   );
 }
 
@@ -982,12 +965,12 @@ class _VocabDialogState extends State<VocabDialog> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Text(
+          Text(
             '常被听错的人名、品牌、产品名。填了「常被听成」的，出字时自动换成对的；整理纪要、「顺一下」也会照这里改错字。',
             style: TextStyle(color: K.mute, fontSize: 13, height: 1.6),
           ),
           const SizedBox(height: 12),
-          const Row(
+          Row(
             children: [
               Expanded(
                 flex: 2,
@@ -1018,7 +1001,7 @@ class _VocabDialogState extends State<VocabDialog> {
                           tooltip: '删掉这个词',
                           visualDensity: VisualDensity.compact,
                           onPressed: () => setState(() => rows.removeAt(i)),
-                          icon: const Icon(Icons.close_rounded, size: 18, color: K.faint),
+                          icon: Icon(Icons.close_rounded, size: 18, color: K.faint),
                         ),
                       ],
                     ),
@@ -1048,10 +1031,10 @@ class _VocabDialogState extends State<VocabDialog> {
     decoration: BoxDecoration(color: K.paper.withValues(alpha: 0.35), borderRadius: BorderRadius.circular(8)),
     child: TextField(
       controller: c,
-      style: const TextStyle(fontSize: 14, color: K.ink),
+      style: TextStyle(fontSize: 14, color: K.ink),
       decoration: InputDecoration(
         hintText: hint,
-        hintStyle: const TextStyle(color: K.faint),
+        hintStyle: TextStyle(color: K.faint),
       ),
     ),
   );

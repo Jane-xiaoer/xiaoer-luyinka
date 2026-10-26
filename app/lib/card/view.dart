@@ -98,7 +98,7 @@ class _CardViewState extends State<CardView> {
           const SizedBox(height: 14),
           _list(context, recs),
           const SizedBox(height: 12),
-          const Text(
+          Text(
             '卡一靠近就自动拉下来、转写、按类别整理进录音卡，不用点。点开一条能看全文、听原声。'
             '导入好了的，设置里打开「导入后从卡上删」就会自动从卡上删掉，给卡腾地方。',
             style: TextStyle(color: K.faint, fontSize: 12, height: 1.7),
@@ -151,7 +151,7 @@ class _CardViewState extends State<CardView> {
           label: const Text('现在同步'),
           style: OutlinedButton.styleFrom(
             foregroundColor: K.ink,
-            side: const BorderSide(color: K.lineStrong),
+            side: BorderSide(color: K.lineStrong),
           ),
         ),
       ],
@@ -167,7 +167,7 @@ class _CardViewState extends State<CardView> {
     Widget meta(String k, String v) => Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(k, style: const TextStyle(color: K.faint, fontSize: 11.5)),
+        Text(k, style: TextStyle(color: K.faint, fontSize: 11.5)),
         const SizedBox(height: 2),
         Text(
           v,
@@ -186,7 +186,7 @@ class _CardViewState extends State<CardView> {
                 width: 104,
                 height: 104,
                 alignment: Alignment.center,
-                decoration: const BoxDecoration(
+                decoration: BoxDecoration(
                   color: K.blush,
                   shape: BoxShape.circle,
                 ),
@@ -223,7 +223,7 @@ class _CardViewState extends State<CardView> {
                       ],
                     ),
                     const SizedBox(height: 4),
-                    const Text(
+                    Text(
                       '小耳录音卡',
                       style: TextStyle(color: K.mute, fontSize: 12.5),
                     ),
@@ -257,7 +257,7 @@ class _CardViewState extends State<CardView> {
                   setState(() {});
                 },
                 selectedColor: K.cardDeep,
-                side: const BorderSide(color: K.line),
+                side: BorderSide(color: K.line),
                 visualDensity: VisualDensity.compact,
               ),
               TextButton.icon(
@@ -272,7 +272,7 @@ class _CardViewState extends State<CardView> {
             const SizedBox(height: 6),
             Text(
               syncer.card.error!,
-              style: const TextStyle(color: K.accent, fontSize: 12),
+              style: TextStyle(color: K.accent, fontSize: 12),
             ),
           ],
         ],
@@ -326,7 +326,7 @@ class _CardViewState extends State<CardView> {
               const SizedBox(width: 10),
               Text(
                 pct == null ? '连上才知道' : (i!.charging ? '充电中' : '电量 $pct%'),
-                style: const TextStyle(color: K.mute, fontSize: 12.5),
+                style: TextStyle(color: K.mute, fontSize: 12.5),
               ),
             ],
           ),
@@ -345,7 +345,7 @@ class _CardViewState extends State<CardView> {
             used == null
                 ? '存储：连上才知道'
                 : '已用 ${gb(i!.totalKb! - (i.freeKb ?? 0))} / ${gb(i.totalKb!)}',
-            style: const TextStyle(color: K.faint, fontSize: 12),
+            style: TextStyle(color: K.faint, fontSize: 12),
           ),
         ],
       ),
@@ -370,7 +370,7 @@ class _CardViewState extends State<CardView> {
                 style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
               ),
               const SizedBox(width: 8),
-              Text('${recs.length}', style: const TextStyle(color: K.faint)),
+              Text('${recs.length}', style: TextStyle(color: K.faint)),
             ],
           ),
           const SizedBox(height: 10),
@@ -387,7 +387,7 @@ class _CardViewState extends State<CardView> {
                   onSelected: (_) => setState(() => _filter = k),
                   showCheckmark: false,
                   selectedColor: K.cardDeep,
-                  side: const BorderSide(color: K.line),
+                  side: BorderSide(color: K.line),
                   labelStyle: TextStyle(
                     fontSize: 12.5,
                     color: _filter == k ? K.ink : K.mute,
@@ -401,14 +401,14 @@ class _CardViewState extends State<CardView> {
           ),
           const SizedBox(height: 4),
           if (shown.isEmpty)
-            const Padding(
+            Padding(
               padding: EdgeInsets.symmetric(vertical: 28),
               child: Center(
                 child: Text('这里还没有', style: TextStyle(color: K.mute)),
               ),
             ),
           for (final (k, r) in shown.indexed) ...[
-            if (k > 0) const Divider(height: 1, color: K.line),
+            if (k > 0) Divider(height: 1, color: K.line),
             _row(context, r),
           ],
         ],
@@ -479,7 +479,7 @@ class _CardViewState extends State<CardView> {
         : const <Scene>[];
     final pill = OutlinedButton.styleFrom(
       foregroundColor: K.ink,
-      side: const BorderSide(color: K.lineStrong),
+      side: BorderSide(color: K.lineStrong),
       visualDensity: VisualDensity.compact,
     );
     return InkWell(
@@ -492,7 +492,7 @@ class _CardViewState extends State<CardView> {
           children: [
             Row(
               children: [
-                const Icon(Icons.sd_card_outlined, color: K.mute, size: 22),
+                Icon(Icons.sd_card_outlined, color: K.mute, size: 22),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
@@ -510,7 +510,7 @@ class _CardViewState extends State<CardView> {
                         children: [
                           Text(
                             recDuration(_seconds(r)),
-                            style: const TextStyle(
+                            style: TextStyle(
                               color: K.mute,
                               fontSize: 12.5,
                             ),
@@ -531,7 +531,7 @@ class _CardViewState extends State<CardView> {
                           scenes.map((s) => s.title).join(' · '),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
+                          style: TextStyle(
                             color: K.ink,
                             fontSize: 13.5,
                             fontWeight: FontWeight.w600,
@@ -544,7 +544,7 @@ class _CardViewState extends State<CardView> {
                           text,
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
+                          style: TextStyle(
                             color: K.mute,
                             fontSize: 13.5,
                             height: 1.5,

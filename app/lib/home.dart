@@ -7,7 +7,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'analyze.dart';
-import 'bean/panel.dart';
 import 'bean/sync.dart';
 import 'bean/view.dart';
 import 'card/view.dart';
@@ -435,7 +434,7 @@ class _HomeState extends State<Home> {
                           store: store, day: day, scenes: scenes, pending: pendingToday, selected: scene?.id,
                           onHandoff: _handoff, askKey: _askKey, onOpen: openFound, onPick: _pickScene)),
         ),
-        const VerticalDivider(width: 1, color: K.line),
+        VerticalDivider(width: 1, color: K.line),
         Expanded(
             child: draft != null
                 ? DraftDetail(draft: draft!, top: 36)
@@ -605,7 +604,7 @@ class SourceTag extends StatelessWidget {
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         Icon(icon, size: 12, color: K.faint),
         const SizedBox(width: 3),
-        Text(s, style: const TextStyle(fontSize: 11.5, color: K.faint)),
+        Text(s, style: TextStyle(fontSize: 11.5, color: K.faint)),
       ]),
     );
   }
@@ -707,7 +706,7 @@ class _ProgressBannerState extends State<ProgressBanner> {
                 ? Icon(Icons.error_outline_rounded, size: c ? 20 : 22, color: K.accent)
                 : SizedBox(
                     width: c ? 16 : 18, height: c ? 16 : 18,
-                    child: const CircularProgressIndicator(strokeWidth: 2.4, color: K.live)),
+                    child: CircularProgressIndicator(strokeWidth: 2.4, color: K.live)),
           ),
           Expanded(
             child: Text(stalled ? parts.first : a.headline,
@@ -726,13 +725,13 @@ class _ProgressBannerState extends State<ProgressBanner> {
           for (final p in parts.skip(1))
             Padding(
               padding: const EdgeInsets.only(top: 4, left: 32),
-              child: Text(p, style: const TextStyle(fontSize: 13.5, color: K.ink, height: 1.45)),
+              child: Text(p, style: TextStyle(fontSize: 13.5, color: K.ink, height: 1.45)),
             ),
         Padding(
           padding: EdgeInsets.only(top: 6, left: stalled ? 32 : 0),
           child: Text(
             stalled ? '眼下：${a.headline}' : (a.detail ?? ''),
-            style: const TextStyle(fontSize: 12.5, color: K.mute, height: 1.45),
+            style: TextStyle(fontSize: 12.5, color: K.mute, height: 1.45),
           ),
         ),
         Padding(
@@ -814,11 +813,11 @@ class PendingRow extends StatelessWidget {
           SizedBox(
               width: 52,
               child: Text(t == null ? '' : hm(t),
-                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: K.faint,
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: K.faint,
                       fontFeatures: [FontFeature.tabularFigures()]))),
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(placeholderLine(rec), style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15, color: K.mute)),
+              Text(placeholderLine(rec), style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15, color: K.mute)),
               const SizedBox(height: 6),
               ClipRRect(
                 borderRadius: BorderRadius.circular(99),
@@ -826,7 +825,7 @@ class PendingRow extends StatelessWidget {
                     value: f?.clamp(0.0, 1.0), minHeight: 4, color: K.faint, backgroundColor: K.line),
               ),
               const SizedBox(height: 6),
-              const Text('还在处理，好了这里自动换成笔记', style: TextStyle(fontSize: 12.5, color: K.faint)),
+              Text('还在处理，好了这里自动换成笔记', style: TextStyle(fontSize: 12.5, color: K.faint)),
             ]),
           ),
         ]),
@@ -848,21 +847,21 @@ class TopBar extends StatelessWidget {
     return Container(
       height: 56,
       padding: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: const BoxDecoration(color: K.bar, border: Border(bottom: BorderSide(color: K.line))),
+      decoration: BoxDecoration(color: K.bar, border: Border(bottom: BorderSide(color: K.line))),
       child: Row(children: [
         Mascot(_live(syncer, store) ? 'stand' : 'sleep', size: 36),
         const SizedBox(width: 8),
         Expanded(
           child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(title, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-            Text(sub, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: K.mute)),
+            Text(sub, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12, color: K.mute)),
           ]),
         ),
         if (syncer.boundId == null && syncer.card.choices.length > 1)
           TextButton(onPressed: () => showCardPicker(context, syncer), child: const Text('选卡')),
         IconButton(
           tooltip: '设置',
-          icon: const Icon(Icons.tune, size: 20, color: K.mute),
+          icon: Icon(Icons.tune, size: 20, color: K.mute),
           onPressed: () => showSettings(context, store, syncer),
         ),
         HandoffButton(onPressed: onHandoff, compact: true),
@@ -913,36 +912,23 @@ class Sidebar extends StatelessWidget {
   Widget build(BuildContext context) => Container(
         color: K.bar,
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          // 顶上：名字 + 「开会」（现场会议是一个动作，不跟内容、设备混在一列）
           Padding(
             // Mac 红绿灯压在左上，往下让一点
-            padding: EdgeInsets.fromLTRB(16, Platform.isMacOS ? 46 : 20, 16, 18),
+            padding: EdgeInsets.fromLTRB(16, Platform.isMacOS ? 46 : 20, 12, 16),
             child: Row(children: [
-              const Mascot('stand', size: 38, halo: true),
-              const SizedBox(width: 10),
-              Text('小耳录音卡', style: K.title(18).copyWith(color: K.ink)),
-            ]),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-            child: ModeSwitch(mode: mode, onMode: onMode),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
-            child: Column(children: [
-              NavRow(icon: Icons.sd_card_outlined, text: '录音卡', selected: mode == 7, onTap: () => onMode(7),
-                  trailing: syncer.card.connected || store.pending.any((r) => sourceOf(r.stem) == '录音卡')
-                      ? Container(width: 8, height: 8, decoration: const BoxDecoration(color: K.live, shape: BoxShape.circle))
-                      : null),
-              if (bean != null)
-                NavRow(icon: Icons.graphic_eq_rounded, text: '录音豆', selected: mode == 6, onTap: () => onMode(6),
-                    trailing: BeanDot(bean: bean!)),
-              NavRow(icon: Icons.mic_none_rounded, text: '现场会议', selected: mode == 5, onTap: () => onMode(5),
-                  trailing: live == null ? null : LiveDot(live: live!)),
-              NavRow(icon: Icons.checklist_rounded, text: '待办', count: todoCount, selected: mode == 3, onTap: () => onMode(3)),
-              NavRow(icon: Icons.event_note_outlined, text: '每周回顾', selected: mode == 4, onTap: () => onMode(4)),
+              const Mascot('stand', size: 34, halo: true),
+              const SizedBox(width: 8),
+              Expanded(child: Text('小耳录音卡', overflow: TextOverflow.ellipsis, style: K.title(17).copyWith(color: K.ink))),
+              MeetButton(live: live, selected: mode == 5, onTap: () => onMode(5)),
             ]),
           ),
           if (search != null) Padding(padding: const EdgeInsets.fromLTRB(12, 0, 12, 10), child: search),
+          // 看内容：按天 / 按类别 / 按人，左栏主体
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+            child: ModeSwitch(mode: mode, onMode: onMode),
+          ),
           Expanded(
               child: switch (mode) {
             1 => CatNav(store: store, cat: cat, onPick: onPickCat),
@@ -950,8 +936,119 @@ class Sidebar extends StatelessWidget {
             4 => WeekNav(store: store, weeks: weeks, week: week, onPick: (k) => onPickWeek?.call(k)),
             _ => DayNav(store: store, days: daysWithPending(store.days.keys, store.pending), day: day, onPick: onPick),
           }),
-          CardPanel(syncer: syncer, store: store),
+          _rule(),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(10, 0, 10, 0),
+            child: Column(children: [
+              NavRow(icon: Icons.checklist_rounded, text: '待办', count: todoCount, selected: mode == 3, onTap: () => onMode(3)),
+              NavRow(icon: Icons.event_note_outlined, text: '每周回顾', selected: mode == 4, onTap: () => onMode(4)),
+            ]),
+          ),
+          _rule(),
+          // 设备：一台一行，点进去是设备页
+          Padding(
+            padding: const EdgeInsets.fromLTRB(10, 0, 10, 4),
+            child: Column(children: [
+              DeviceRow(
+                icon: Icons.sd_card_outlined,
+                name: '录音卡',
+                listen: store,
+                status: () => _cardLine(),
+                on: () => syncer.card.connected || store.pending.any((r) => sourceOf(r.stem) == '录音卡'),
+                selected: mode == 7,
+                onTap: syncer.boundId == null && syncer.card.choices.length > 1
+                    ? () => showCardPicker(context, syncer)
+                    : () => onMode(7),
+              ),
+              if (bean != null)
+                DeviceRow(
+                  icon: Icons.graphic_eq_rounded,
+                  name: '录音豆',
+                  listen: bean!,
+                  status: () => bean!.connected || bean!.here == true
+                      ? '${bean!.info?.battery ?? '—'}%'
+                      : (bean!.mac == null ? '没连过' : '不在旁边'),
+                  on: () => bean!.connected || bean!.here == true,
+                  selected: mode == 6,
+                  onTap: () => onMode(6),
+                ),
+              NavRow(icon: Icons.tune, text: '设置', selected: false, onTap: () => showSettings(context, store, syncer)),
+            ]),
+          ),
+          const SizedBox(height: 8),
         ]),
+      );
+
+  Widget _rule() => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 6),
+        child: Divider(height: 1, color: K.lineStrong.withValues(alpha: 0.6)),
+      );
+
+  /// 录音卡那一行右边的短状态：选卡 / 电量 / 不在旁边
+  String _cardLine() {
+    if (syncer.boundId == null) return syncer.card.choices.length > 1 ? '选卡' : '没连过';
+    if (store.pending.any((r) => r.stage == 'pulling' && sourceOf(r.stem) == '录音卡')) return '拉取中';
+    final b = syncer.card.info?.battery ?? (store.settings['cardInfo'] is List ? (store.settings['cardInfo'] as List)[0] as int? : null);
+    if (syncer.card.connected) return b == null ? '已连接' : (b >= 110 ? '充电中' : '$b%');
+    return '不在旁边';
+  }
+}
+
+/// 设备一行：图标 + 名字 + 在不在的小点 + 右边一个短状态（电量 / 不在旁边）。
+class DeviceRow extends StatelessWidget {
+  final IconData icon;
+  final String name;
+  final Listenable listen;
+  final String Function() status;
+  final bool Function() on;
+  final bool selected;
+  final VoidCallback onTap;
+  const DeviceRow({super.key, required this.icon, required this.name, required this.listen, required this.status,
+      required this.on, required this.selected, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+        listenable: listen,
+        builder: (_, _) => NavRow(
+          icon: icon,
+          text: name,
+          selected: selected,
+          onTap: onTap,
+          trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+            Text(status(), style: TextStyle(fontSize: 12, color: K.faint)),
+            const SizedBox(width: 6),
+            Container(width: 7, height: 7, decoration: BoxDecoration(color: on() ? K.live : K.lineStrong, shape: BoxShape.circle)),
+          ]),
+        ),
+      );
+}
+
+/// 左栏顶上的「开会」：点了进现场会议；正在录时变成「会议中」。
+class MeetButton extends StatelessWidget {
+  final LiveSession? live;
+  final bool selected;
+  final VoidCallback onTap;
+  const MeetButton({super.key, required this.live, required this.selected, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+        listenable: live ?? ValueNotifier(0),
+        builder: (_, _) {
+          final rec = live?.state == LiveState.recording;
+          final active = live?.active == true;
+          return FilledButton.icon(
+            onPressed: onTap,
+            icon: Icon(rec ? Icons.fiber_manual_record : Icons.mic_none_rounded, size: 15),
+            label: Text(rec ? '会议中' : (active ? '接着开' : '开会')),
+            style: FilledButton.styleFrom(
+              backgroundColor: rec || selected ? K.accent : K.card,
+              foregroundColor: rec || selected ? Colors.white : K.ink,
+              visualDensity: VisualDensity.compact,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+            ),
+          );
+        },
       );
 }
 
@@ -1002,14 +1099,14 @@ class SearchField extends StatelessWidget {
           decoration: BoxDecoration(color: K.card.withValues(alpha: 0.85), borderRadius: BorderRadius.circular(12),
               border: Border.all(color: K.line)),
           child: Row(children: [
-            const Icon(Icons.search, size: 17, color: K.faint),
+            Icon(Icons.search, size: 17, color: K.faint),
             const SizedBox(width: 6),
             Expanded(
               child: TextField(
                 controller: controller,
                 onChanged: onChanged,
                 style: const TextStyle(fontSize: 13.5),
-                decoration: const InputDecoration(hintText: '搜标题、人、说过的话…', hintStyle: TextStyle(fontSize: 13, color: K.faint),
+                decoration: InputDecoration(hintText: '搜标题、人、说过的话…', hintStyle: TextStyle(fontSize: 13, color: K.faint),
                     contentPadding: EdgeInsets.symmetric(vertical: 8)),
               ),
             ),
@@ -1020,7 +1117,7 @@ class SearchField extends StatelessWidget {
                   : IconButton(
                       tooltip: '清空搜索',
                       visualDensity: VisualDensity.compact,
-                      icon: const Icon(Icons.close, size: 16, color: K.mute),
+                      icon: Icon(Icons.close, size: 16, color: K.mute),
                       onPressed: onClear,
                     ),
             ),
@@ -1065,7 +1162,7 @@ class CatNav extends StatelessWidget {
             ),
           ),
         ),
-      if (c.isNotEmpty) const Padding(padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6), child: Divider(height: 1, color: K.line)),
+      if (c.isNotEmpty) Padding(padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6), child: Divider(height: 1, color: K.line)),
       Material(
         color: cat == draftsKey ? K.card : Colors.transparent,
         borderRadius: BorderRadius.circular(10),
@@ -1101,7 +1198,7 @@ class PeopleNav extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (people.isEmpty) {
-      return const Padding(
+      return Padding(
         padding: EdgeInsets.all(16),
         child: Text('整理好的记录里还没认出人名。', style: TextStyle(fontSize: 13, color: K.faint)),
       );
@@ -1171,67 +1268,6 @@ class DayNav extends StatelessWidget {
             ),
           ),
       ]);
-}
-
-/// 左栏底下的卡片：卡在不在、电量、选卡；设置也在这。
-class CardPanel extends StatelessWidget {
-  final Syncer syncer;
-  final Store store;
-  const CardPanel({super.key, required this.syncer, required this.store});
-
-  @override
-  Widget build(BuildContext context) {
-    final (title, sub) = cardStatus(syncer, store);
-    final live = _live(syncer, store);
-    return Container(
-      margin: const EdgeInsets.fromLTRB(10, 8, 10, 12),
-      padding: const EdgeInsets.fromLTRB(10, 10, 6, 4),
-      decoration: BoxDecoration(color: K.card, borderRadius: BorderRadius.circular(14), border: Border.all(color: K.line)),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Row(children: [
-          Mascot(live ? 'stand' : 'sleep', size: 44),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Row(children: [
-                Container(width: 7, height: 7,
-                    decoration: BoxDecoration(color: live ? K.live : K.line, shape: BoxShape.circle)),
-                const SizedBox(width: 6),
-                Flexible(child: Text(title, overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600))),
-              ]),
-              const SizedBox(height: 2),
-              Text(sub, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: K.mute, height: 1.4)),
-            ]),
-          ),
-        ]),
-        if (syncer.boundId == null && syncer.card.choices.length > 1)
-          Padding(
-            padding: const EdgeInsets.only(top: 8, right: 4),
-            child: FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: K.accent, minimumSize: const Size(0, 34)),
-              onPressed: () => showCardPicker(context, syncer),
-              child: const Text('选你的卡'),
-            ),
-          ),
-        Row(children: [
-          TextButton.icon(
-            style: TextButton.styleFrom(foregroundColor: K.mute, padding: const EdgeInsets.symmetric(horizontal: 6)),
-            onPressed: () => showSettings(context, store, syncer),
-            icon: const Icon(Icons.tune, size: 16),
-            label: const Text('设置', style: TextStyle(fontSize: 13)),
-          ),
-          const Spacer(),
-          IconButton(
-            tooltip: '现在同步',
-            visualDensity: VisualDensity.compact,
-            icon: const Icon(Icons.refresh, size: 18, color: K.mute),
-            onPressed: () => syncer.run(),
-          ),
-        ]),
-      ]),
-    );
-  }
 }
 
 // ───────── 中栏：当天时间线 + 问答 ─────────
@@ -1335,13 +1371,13 @@ class CatColumn extends StatelessWidget {
           ]),
           if (hint.isNotEmpty) ...[
             const SizedBox(height: 8),
-            Text(hint, style: const TextStyle(fontSize: 12, color: K.faint)),
+            Text(hint, style: TextStyle(fontSize: 12, color: K.faint)),
           ],
           if (onIdeas != null) ...[
             const SizedBox(height: 10),
             OutlinedButton.icon(
               style: OutlinedButton.styleFrom(
-                  foregroundColor: K.accent, side: const BorderSide(color: K.accentEdge), visualDensity: VisualDensity.compact,
+                  foregroundColor: K.accent, side: BorderSide(color: K.accentEdge), visualDensity: VisualDensity.compact,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(99))),
               onPressed: onIdeas,
               icon: const Icon(Icons.auto_awesome_outlined, size: 16),
@@ -1361,11 +1397,11 @@ class CatColumn extends StatelessWidget {
                 padding: const EdgeInsets.fromLTRB(8, 10, 8, 6),
                 child: Row(children: [
                   Text(bySubject ? g.key : dayTitle(g.key, short: true),
-                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: K.mute)),
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: K.mute)),
                   const SizedBox(width: 8),
-                  if (bySubject) Text('${g.value.length} 次', style: const TextStyle(fontSize: 12, color: K.faint)),
+                  if (bySubject) Text('${g.value.length} 次', style: TextStyle(fontSize: 12, color: K.faint)),
                   const SizedBox(width: 8),
-                  const Expanded(child: Divider(color: K.line)),
+                  Expanded(child: Divider(color: K.line)),
                 ]),
               ),
               for (final s in g.value) SceneRow(scene: s, selected: s.id == selected, onTap: () => onPick(s), showDate: bySubject),
@@ -1439,7 +1475,7 @@ class PersonSummary extends StatelessWidget {
   Widget build(BuildContext context) {
     final last = scenes.firstOrNull;
     final todos = todosWith(scenes, name);
-    const body = TextStyle(fontSize: 13.5, height: 1.6, color: K.ink);
+    final body = TextStyle(fontSize: 13.5, height: 1.6, color: K.ink);
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 12, 12, 10),
       decoration: BoxDecoration(color: K.cardDeep, borderRadius: BorderRadius.circular(16), border: Border.all(color: K.accentEdge)),
@@ -1450,20 +1486,20 @@ class PersonSummary extends StatelessWidget {
           InkWell(
             onTap: () => onOpen(last),
             child: Text.rich(TextSpan(children: [
-              const TextSpan(text: '最近一次：', style: TextStyle(color: K.mute)),
+              TextSpan(text: '最近一次：', style: TextStyle(color: K.mute)),
               TextSpan(text: '${last.start.month}/${last.start.day} ${hm(last.start)} ${last.title}',
                   style: const TextStyle(fontWeight: FontWeight.w600)),
-              if (last.event.isNotEmpty) TextSpan(text: '。${last.event}', style: const TextStyle(color: K.mute)),
+              if (last.event.isNotEmpty) TextSpan(text: '。${last.event}', style: TextStyle(color: K.mute)),
             ]), style: body),
           ),
         const SizedBox(height: 8),
         Text(todos.isEmpty ? '还没兑现的待办：没有' : '还没兑现的待办（${todos.length}）',
-            style: const TextStyle(fontSize: 13, color: K.mute, fontWeight: FontWeight.w600)),
+            style: TextStyle(fontSize: 13, color: K.mute, fontWeight: FontWeight.w600)),
         for (final t in todos.take(8))
           Padding(
             padding: const EdgeInsets.only(top: 4),
             child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Padding(padding: EdgeInsets.only(top: 3, right: 6), child: Icon(Icons.check_box_outline_blank, size: 14, color: K.todo)),
+              Padding(padding: EdgeInsets.only(top: 3, right: 6), child: Icon(Icons.check_box_outline_blank, size: 14, color: K.todo)),
               Expanded(
                 child: Text(
                     '${t.text}${t.who.isNotEmpty ? '（${t.who}）' : ''}${t.when.isNotEmpty ? ' · ${t.when}' : ''}'
@@ -1472,7 +1508,7 @@ class PersonSummary extends StatelessWidget {
               ),
             ]),
           ),
-        if (todos.length > 8) Text('还有 ${todos.length - 8} 条，在各段里看', style: const TextStyle(fontSize: 12, color: K.faint)),
+        if (todos.length > 8) Text('还有 ${todos.length - 8} 条，在各段里看', style: TextStyle(fontSize: 12, color: K.faint)),
         Align(
           alignment: Alignment.centerRight,
           child: TextButton.icon(
@@ -1529,7 +1565,7 @@ class SearchColumn extends StatelessWidget {
           topic: topic, focus: _focus(found, selected),
           hint: '问问小耳：模糊说说那天大概聊了啥，让它帮你找',
           child: hits.isEmpty && draftHits.isEmpty
-              ? const Center(
+              ? Center(
                   child: Padding(
                     padding: EdgeInsets.all(24),
                     child: Text('没找到，试试在下面问小耳', style: TextStyle(color: K.mute, fontSize: 14)),
@@ -1560,12 +1596,12 @@ class SnippetText extends StatelessWidget {
     var at = 0;
     for (final (a, b) in snippet.marks) {
       if (a > at) spans.add(TextSpan(text: t.substring(at, a)));
-      spans.add(TextSpan(text: t.substring(a, b), style: const TextStyle(color: K.accent, fontWeight: FontWeight.w700)));
+      spans.add(TextSpan(text: t.substring(a, b), style: TextStyle(color: K.accent, fontWeight: FontWeight.w700)));
       at = b;
     }
     if (at < t.length) spans.add(TextSpan(text: t.substring(at)));
     return Text.rich(TextSpan(children: spans), maxLines: 3, overflow: TextOverflow.ellipsis,
-        style: const TextStyle(fontSize: 12.5, color: K.faint, height: 1.5));
+        style: TextStyle(fontSize: 12.5, color: K.faint, height: 1.5));
   }
 }
 
@@ -1610,7 +1646,7 @@ class SceneRow extends StatelessWidget {
                     ]),
                     const SizedBox(height: 4),
                     Text(scene.event, maxLines: 2, overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 13, color: K.mute, height: 1.5)),
+                        style: TextStyle(fontSize: 13, color: K.mute, height: 1.5)),
                     if (extra != null) ...[const SizedBox(height: 4), extra!],
                   ]),
                 ),
@@ -1653,7 +1689,7 @@ class Hint extends StatelessWidget {
             const SizedBox(height: 18),
             Text(title, style: K.title(22)),
             const SizedBox(height: 10),
-            Text(body, textAlign: TextAlign.center, style: const TextStyle(color: K.mute, height: 1.7)),
+            Text(body, textAlign: TextAlign.center, style: TextStyle(color: K.mute, height: 1.7)),
           ]),
         ),
       );
@@ -1834,7 +1870,7 @@ class AskBoxState extends State<AskBox> {
           margin: const EdgeInsets.only(left: 48, bottom: 12),
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
           decoration: BoxDecoration(color: K.accentSoft, borderRadius: BorderRadius.circular(14)),
-          child: SelectableText(m.text, style: const TextStyle(fontSize: 14.5, height: 1.6, color: K.ink)),
+          child: SelectableText(m.text, style: TextStyle(fontSize: 14.5, height: 1.6, color: K.ink)),
         ),
       );
     }
@@ -1853,7 +1889,7 @@ class AskBoxState extends State<AskBox> {
               if (m.error)
                 Padding(
                   padding: const EdgeInsets.only(right: 6, bottom: 8),
-                  child: SelectableText(m.text, style: const TextStyle(fontSize: 14, height: 1.6, color: K.todo)),
+                  child: SelectableText(m.text, style: TextStyle(fontSize: 14, height: 1.6, color: K.todo)),
                 )
               else
                 Padding(padding: const EdgeInsets.only(right: 6), child: MdView(m.text)),
@@ -1891,12 +1927,12 @@ class AskBoxState extends State<AskBox> {
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 4, 10, 4),
             child: Row(children: [
-              const Text('和小耳的对话', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: K.mute)),
+              Text('和小耳的对话', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: K.mute)),
               if (widget.focus != null) ...[
                 const SizedBox(width: 8),
                 Flexible(
                   child: Text('正在看：${widget.focus!.title}', overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 12, color: K.faint)),
+                      style: TextStyle(fontSize: 12, color: K.faint)),
                 ),
               ],
               const Spacer(),
@@ -1913,12 +1949,12 @@ class AskBoxState extends State<AskBox> {
               ),
             ]),
           ),
-          const Divider(height: 1, color: K.line),
+          Divider(height: 1, color: K.line),
           Expanded(
             child: ListView(controller: _scroll, padding: const EdgeInsets.fromLTRB(18, 14, 18, 6), children: [
               for (final m in _msgs) _bubble(m),
               if (_busy)
-                const Padding(
+                Padding(
                   padding: EdgeInsets.only(bottom: 14),
                   child: Row(children: [
                     Mascot('stand', size: 30),
@@ -1959,7 +1995,7 @@ class AskBoxState extends State<AskBox> {
           ),
         // 还在用小耳的体验额度：提醒填自己的模型 key（对外发的版本，每个人用自己的）
         if (Llm.instance != null && !Llm.instance!.own)
-          const Padding(
+          Padding(
             padding: EdgeInsets.fromLTRB(20, 8, 20, 0),
             child: Text(
               '整理和问答现在用的是小耳的体验额度（每天有限）。在左下角「设置」里填你自己的模型 key（DeepSeek 等），'
@@ -2004,7 +2040,7 @@ class FoundCard extends StatelessWidget {
     final s = scene;
     return Material(
       color: K.card,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: const BorderSide(color: K.accentEdge)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: K.accentEdge)),
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
         onTap: onTap,
@@ -2015,20 +2051,20 @@ class FoundCard extends StatelessWidget {
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Wrap(spacing: 8, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
                   Text('${s.start.month}/${s.start.day} ${hm(s.start)}',
-                      style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: K.accent,
+                      style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: K.accent,
                           fontFeatures: [FontFeature.tabularFigures()])),
                   Chip2(s.category),
                   SourceTag(s.stem),
-                  Text(s.title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: K.ink)),
+                  Text(s.title, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: K.ink)),
                 ]),
                 if (s.event.isNotEmpty) ...[
                   const SizedBox(height: 3),
                   Text(s.event, maxLines: 2, overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 12.5, color: K.mute, height: 1.5)),
+                      style: TextStyle(fontSize: 12.5, color: K.mute, height: 1.5)),
                 ],
               ]),
             ),
-            const Padding(padding: EdgeInsets.only(top: 2), child: Icon(Icons.chevron_right, size: 18, color: K.accent)),
+            Padding(padding: EdgeInsets.only(top: 2), child: Icon(Icons.chevron_right, size: 18, color: K.accent)),
           ]),
         ),
       ),
@@ -2077,7 +2113,7 @@ class _SceneDetailState extends State<SceneDetail> {
   Widget _btn(String label, IconData icon, VoidCallback? onPressed, {String? tip}) {
     final b = OutlinedButton.icon(
       style: OutlinedButton.styleFrom(
-          foregroundColor: K.accent, side: const BorderSide(color: K.accentEdge), visualDensity: VisualDensity.compact,
+          foregroundColor: K.accent, side: BorderSide(color: K.accentEdge), visualDensity: VisualDensity.compact,
           tapTargetSize: MaterialTapTargetSize.shrinkWrap, minimumSize: const Size(0, 28),
           padding: const EdgeInsets.symmetric(horizontal: 10), textStyle: const TextStyle(fontSize: 12.5),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(99))),
@@ -2119,7 +2155,7 @@ class _SceneDetailState extends State<SceneDetail> {
 
   Widget _ts(String clock) => InkWell(
         onTap: () => _play(clock),
-        child: Text(clock.substring(0, 5), style: const TextStyle(color: K.accent, fontFeatures: [FontFeature.tabularFigures()])),
+        child: Text(clock.substring(0, 5), style: TextStyle(color: K.accent, fontFeatures: [FontFeature.tabularFigures()])),
       );
 
   /// 逐字稿每一行：点时间从那里听，正在播的那行高亮。
@@ -2172,7 +2208,7 @@ class _SceneDetailState extends State<SceneDetail> {
     Widget meta(IconData i, String t) => Row(mainAxisSize: MainAxisSize.min, children: [
           Icon(i, size: 14, color: K.faint),
           const SizedBox(width: 4),
-          Text(t, style: const TextStyle(fontSize: 13, color: K.faint)),
+          Text(t, style: TextStyle(fontSize: 13, color: K.faint)),
         ]);
     final todo = [
       for (final a in s.actions) '${a['text']}${(a['who'] ?? '').toString().isNotEmpty ? '（${a['who']}）' : ''}',
@@ -2210,7 +2246,7 @@ class _SceneDetailState extends State<SceneDetail> {
           showSelectedIcon: false,
           style: SegmentedButton.styleFrom(
               visualDensity: VisualDensity.compact, selectedForegroundColor: K.accent,
-              selectedBackgroundColor: K.accentSoft, side: const BorderSide(color: K.accentEdge)),
+              selectedBackgroundColor: K.accentSoft, side: BorderSide(color: K.accentEdge)),
           onSelectionChanged: (v) => SceneDetail.transcriptTab.value = v.first,
         ),
       ),
@@ -2221,9 +2257,9 @@ class _SceneDetailState extends State<SceneDetail> {
         const SizedBox(height: 14),
         _tools(s),
         const SizedBox(height: 8),
-        const Text('点时间从那里听', style: TextStyle(fontSize: 12, color: K.faint)),
+        Text('点时间从那里听', style: TextStyle(fontSize: 12, color: K.faint)),
         const SizedBox(height: 8),
-        if (s.text.isEmpty) const Text('这段没有逐字稿。', style: TextStyle(color: K.faint)) else _lines(s, body),
+        if (s.text.isEmpty) Text('这段没有逐字稿。', style: TextStyle(color: K.faint)) else _lines(s, body),
       ]);
     }
     return ListView(key: PageStorageKey(s.id), padding: EdgeInsets.fromLTRB(32, widget.top, 32, 32), children: [
@@ -2272,7 +2308,7 @@ class _SceneDetailState extends State<SceneDetail> {
       const SizedBox(height: 18),
       Wrap(spacing: 10, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
         const Label('逐字稿'),
-        const Text('点时间从那里听', style: TextStyle(fontSize: 12, color: K.faint)),
+        Text('点时间从那里听', style: TextStyle(fontSize: 12, color: K.faint)),
         _tools(s),
       ]),
       const SizedBox(height: 8),
@@ -2345,10 +2381,10 @@ class _CategoryChipState extends State<CategoryChip> {
     final s = widget.scene;
     if (_to != null) {
       return Row(mainAxisSize: MainAxisSize.min, children: [
-        const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2, color: K.accent)),
+        SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2, color: K.accent)),
         const SizedBox(width: 6),
         Text('正在改成「${_to == noiseCat ? noiseCat : catFolder(_to!)}」，按新模板重新整理…',
-            style: const TextStyle(fontSize: 12.5, color: K.accent)),
+            style: TextStyle(fontSize: 12.5, color: K.accent)),
       ]);
     }
     return PopupMenuButton<String>(
@@ -2364,13 +2400,13 @@ class _CategoryChipState extends State<CategoryChip> {
               const SizedBox(width: 10),
               Text(c == noiseCat ? '$noiseCat（不要这段）' : catFolder(c),
                   style: TextStyle(fontWeight: c == s.category ? FontWeight.w700 : FontWeight.w400)),
-              if (c == s.category) ...[const SizedBox(width: 6), const Icon(Icons.check, size: 15, color: K.accent)],
+              if (c == s.category) ...[const SizedBox(width: 6), Icon(Icons.check, size: 15, color: K.accent)],
             ]),
           ),
       ],
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         Chip2(s.category),
-        const Icon(Icons.arrow_drop_down, size: 18, color: K.faint),
+        Icon(Icons.arrow_drop_down, size: 18, color: K.faint),
       ]),
     );
   }
@@ -2474,9 +2510,9 @@ class _MergeBarState extends State<MergeBar> {
     final s = widget.scene, store = widget.store;
     if (_doing != null) {
       return Row(children: [
-        const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2, color: K.accent)),
+        SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2, color: K.accent)),
         const SizedBox(width: 6),
-        Text(_doing!, style: const TextStyle(fontSize: 12.5, color: K.accent)),
+        Text(_doing!, style: TextStyle(fontSize: 12.5, color: K.accent)),
       ]);
     }
     final prev = store.previousOf(s);
@@ -2532,7 +2568,7 @@ class _NoteCardState extends State<NoteCard> {
             IconButton(
               tooltip: '复制这份笔记',
               visualDensity: VisualDensity.compact,
-              icon: const Icon(Icons.copy_rounded, size: 17, color: K.mute),
+              icon: Icon(Icons.copy_rounded, size: 17, color: K.mute),
               onPressed: () async {
                 await Clipboard.setData(ClipboardData(text: '# ${s.title}\n\n${s.body}'));
                 if (context.mounted) {
@@ -2544,19 +2580,19 @@ class _NoteCardState extends State<NoteCard> {
             IconButton(
               tooltip: '在 Finder 里看这份笔记',
               visualDensity: VisualDensity.compact,
-              icon: const Icon(Icons.folder_open_outlined, size: 17, color: K.mute),
+              icon: Icon(Icons.folder_open_outlined, size: 17, color: K.mute),
               onPressed: () => Process.run('open', ['-R', s.d['file']]),
             ),
           TextButton(
             onPressed: _busy ? null : _redo,
             style: TextButton.styleFrom(foregroundColor: K.accent, visualDensity: VisualDensity.compact),
             child: _busy
-                ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: K.accent))
+                ? SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: K.accent))
                 : Text(s.body.isEmpty ? '按模板整理' : '重新整理'),
           ),
         ]),
         const SizedBox(height: 6),
-        if (s.body.isNotEmpty) MdView(s.body) else const Text('这段还没按类别整理过。', style: TextStyle(color: K.faint)),
+        if (s.body.isNotEmpty) MdView(s.body) else Text('这段还没按类别整理过。', style: TextStyle(color: K.faint)),
       ]),
     );
   }
@@ -2572,13 +2608,13 @@ class Minutes extends StatelessWidget {
 
   Widget _head(String t) => Padding(
         padding: const EdgeInsets.only(top: 14, bottom: 6),
-        child: Text(t, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: K.mute, letterSpacing: 1)),
+        child: Text(t, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: K.mute, letterSpacing: 1)),
       );
 
-  Widget _li(String lead, String x, {Color color = K.ink}) => Padding(
+  Widget _li(String lead, String x, {Color? color}) => Padding(
         padding: const EdgeInsets.only(bottom: 4),
         child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          SizedBox(width: 22, child: Text(lead, style: TextStyle(fontSize: 14, height: 1.7, color: color))),
+          SizedBox(width: 22, child: Text(lead, style: TextStyle(fontSize: 14, height: 1.7, color: color ?? K.ink))),
           Expanded(child: SelectableText(x, style: _body)),
         ]),
       );
@@ -2598,7 +2634,7 @@ class Minutes extends StatelessWidget {
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
-          const Label('会议纪要', color: K.accent),
+          Label('会议纪要', color: K.accent),
           const Spacer(),
           if (scene.minutesMd.isNotEmpty)
             TextButton.icon(
@@ -2617,7 +2653,7 @@ class Minutes extends StatelessWidget {
         SelectableText((m['topic'] ?? '').toString(), style: K.title(19).copyWith(color: K.ink)),
         if (strs('attendees').isNotEmpty) ...[
           const SizedBox(height: 4),
-          Text('相关人：${strs('attendees').join('、')}', style: const TextStyle(fontSize: 13, color: K.faint)),
+          Text('相关人：${strs('attendees').join('、')}', style: TextStyle(fontSize: 13, color: K.faint)),
         ],
         if ((m['summary'] ?? '').toString().isNotEmpty) ...[_head('概要'), SelectableText(m['summary'], style: _body)],
         if (agenda.isNotEmpty) ...[
@@ -2625,7 +2661,7 @@ class Minutes extends StatelessWidget {
           for (final (i, a) in agenda.indexed) ...[
             Padding(
               padding: EdgeInsets.only(top: i == 0 ? 0 : 8, bottom: 2),
-              child: Text('${i + 1}. ${a['title']}', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: K.ink)),
+              child: Text('${i + 1}. ${a['title']}', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: K.ink)),
             ),
             for (final x in List<String>.from(a['points'] ?? const [])) _li('·', x, color: K.accent),
             if ((a['conclusion'] ?? '').toString().isNotEmpty) _li('→', '结论：${a['conclusion']}', color: K.accent),
@@ -2717,7 +2753,7 @@ class PlayerBar extends StatelessWidget {
         builder: (_, _) => Container(
           height: 60,
           padding: const EdgeInsets.symmetric(horizontal: 20),
-          decoration: const BoxDecoration(color: K.bar, border: Border(top: BorderSide(color: K.line))),
+          decoration: BoxDecoration(color: K.bar, border: Border(top: BorderSide(color: K.line))),
           child: Row(children: [
             IconButton.filled(
               style: IconButton.styleFrom(backgroundColor: K.ink),
@@ -2726,7 +2762,7 @@ class PlayerBar extends StatelessWidget {
               icon: Icon(player.playing ? Icons.pause : Icons.play_arrow, color: Colors.white),
             ),
             const SizedBox(width: 12),
-            Text(_t(player.pos), style: const TextStyle(fontSize: 13, color: K.mute)),
+            Text(_t(player.pos), style: TextStyle(fontSize: 13, color: K.mute)),
             Expanded(
               child: Slider(
                 activeColor: K.accent,
@@ -2737,7 +2773,7 @@ class PlayerBar extends StatelessWidget {
                 onChanged: player.seekTo,
               ),
             ),
-            Text(_t(player.total), style: const TextStyle(fontSize: 13, color: K.mute)),
+            Text(_t(player.total), style: TextStyle(fontSize: 13, color: K.mute)),
           ]),
         ),
       );
@@ -2758,11 +2794,11 @@ class QuickBar extends StatelessWidget {
     final acts = table[scene.category] ?? const [];
     if (acts.isEmpty) return const SizedBox();
     return Wrap(spacing: 6, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
-      const Text('拿去用', style: TextStyle(fontSize: 12, color: K.faint, fontWeight: FontWeight.w600)),
+      Text('拿去用', style: TextStyle(fontSize: 12, color: K.faint, fontWeight: FontWeight.w600)),
       for (final (name, ask) in acts)
         OutlinedButton(
           style: OutlinedButton.styleFrom(
-              foregroundColor: K.accent, side: const BorderSide(color: K.accentEdge), visualDensity: VisualDensity.compact,
+              foregroundColor: K.accent, side: BorderSide(color: K.accentEdge), visualDensity: VisualDensity.compact,
               tapTargetSize: MaterialTapTargetSize.shrinkWrap, minimumSize: const Size(0, 28),
               padding: const EdgeInsets.symmetric(horizontal: 10), textStyle: const TextStyle(fontSize: 12.5),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(99))),
@@ -2824,7 +2860,7 @@ class DraftRow extends StatelessWidget {
                   ]),
                   if (extra == null && first.isNotEmpty) ...[
                     const SizedBox(height: 4),
-                    Text(first, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13, color: K.mute, height: 1.5)),
+                    Text(first, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 13, color: K.mute, height: 1.5)),
                   ],
                   if (extra != null) ...[const SizedBox(height: 4), extra!],
                 ]),
@@ -2856,12 +2892,12 @@ class DraftColumn extends StatelessWidget {
             const SizedBox(height: 10),
             _Stat(Icons.edit_note, '${drafts.length} 篇'),
             const SizedBox(height: 8),
-            const Text('在对话里让小耳写好的东西，点「存成稿」存在资料文件夹的「成稿」里', style: TextStyle(fontSize: 12, color: K.faint)),
+            Text('在对话里让小耳写好的东西，点「存成稿」存在资料文件夹的「成稿」里', style: TextStyle(fontSize: 12, color: K.faint)),
           ]),
         ),
         Expanded(
           child: drafts.isEmpty
-              ? const Center(
+              ? Center(
                   child: Padding(
                     padding: EdgeInsets.all(24),
                     child: Text('还没有成稿', style: TextStyle(color: K.mute, fontSize: 14)),
@@ -2885,9 +2921,9 @@ class DraftDetail extends StatelessWidget {
         Wrap(spacing: 14, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
           const Chip2(draftsKey),
           Row(mainAxisSize: MainAxisSize.min, children: [
-            const Icon(Icons.schedule, size: 14, color: K.faint),
+            Icon(Icons.schedule, size: 14, color: K.faint),
             const SizedBox(width: 4),
-            Text(draft.when, style: const TextStyle(fontSize: 13, color: K.faint)),
+            Text(draft.when, style: TextStyle(fontSize: 13, color: K.faint)),
           ]),
         ]),
         const SizedBox(height: 10),
@@ -2977,7 +3013,7 @@ class NavRow extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1),
                     decoration: BoxDecoration(color: K.todoSoft, borderRadius: BorderRadius.circular(99)),
-                    child: Text('$count', style: const TextStyle(fontSize: 12, color: K.todo, fontWeight: FontWeight.w700)),
+                    child: Text('$count', style: TextStyle(fontSize: 12, color: K.todo, fontWeight: FontWeight.w700)),
                   ),
                 ?trailing,
               ]),
@@ -3016,7 +3052,7 @@ class WeekNav extends StatelessWidget {
                               style: TextStyle(fontWeight: w.key == week ? FontWeight.w600 : FontWeight.w400,
                                   color: w.key == week ? K.ink : K.mute))),
                       if (store.hasLib && weekFile(store.lib, w) != null)
-                        const Padding(padding: EdgeInsets.only(right: 6), child: Icon(Icons.check, size: 14, color: K.accent)),
+                        Padding(padding: EdgeInsets.only(right: 6), child: Icon(Icons.check, size: 14, color: K.accent)),
                       Text('W${w.number}', style: TextStyle(fontSize: 12, color: w.key == week ? K.accent : K.faint, fontWeight: FontWeight.w600)),
                     ]),
                   ),
@@ -3051,11 +3087,11 @@ class _TodoColumnState extends State<TodoColumn> {
   Widget _head(String t, int n) => Padding(
         padding: const EdgeInsets.fromLTRB(8, 10, 8, 6),
         child: Row(children: [
-          Text(t, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: K.mute)),
+          Text(t, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: K.mute)),
           const SizedBox(width: 8),
-          Text('$n', style: const TextStyle(fontSize: 12, color: K.faint)),
+          Text('$n', style: TextStyle(fontSize: 12, color: K.faint)),
           const SizedBox(width: 8),
-          const Expanded(child: Divider(color: K.line)),
+          Expanded(child: Divider(color: K.line)),
         ]),
       );
 
@@ -3083,7 +3119,7 @@ class _TodoColumnState extends State<TodoColumn> {
             if (done.isNotEmpty) _Stat(Icons.done_all, '已完成 ${done.length}'),
           ]),
           const SizedBox(height: 8),
-          const Text('所有录音里整理出的要办的事。打的勾记在那一段里，每日时间线里也跟着打勾。', style: TextStyle(fontSize: 12, color: K.faint)),
+          Text('所有录音里整理出的要办的事。打的勾记在那一段里，每日时间线里也跟着打勾。', style: TextStyle(fontSize: 12, color: K.faint)),
         ]),
       ),
       Expanded(
@@ -3093,7 +3129,7 @@ class _TodoColumnState extends State<TodoColumn> {
           hint: '问问小耳：这些待办里先做哪件？',
           child: ListView(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6), children: [
             if (all.isEmpty)
-              const Padding(
+              Padding(
                 padding: EdgeInsets.all(24),
                 child: Text('整理出来的待办都会汇到这。现在还没有。', style: TextStyle(color: K.mute, fontSize: 14)),
               ),
@@ -3108,9 +3144,9 @@ class _TodoColumnState extends State<TodoColumn> {
                   child: Row(children: [
                     Icon(_showDone ? Icons.expand_less : Icons.expand_more, size: 18, color: K.mute),
                     const SizedBox(width: 4),
-                    Text('已完成（${done.length}）', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: K.mute)),
+                    Text('已完成（${done.length}）', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: K.mute)),
                     const SizedBox(width: 8),
-                    const Expanded(child: Divider(color: K.line)),
+                    Expanded(child: Divider(color: K.line)),
                   ]),
                 ),
               ),
@@ -3181,7 +3217,7 @@ class _TodoTileState extends State<TodoTile> {
                 ? const Padding(
                     padding: EdgeInsets.all(11), child: SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)))
                 : Checkbox(
-                    value: t.done, activeColor: K.todo, side: const BorderSide(color: K.todo, width: 1.5),
+                    value: t.done, activeColor: K.todo, side: BorderSide(color: K.todo, width: 1.5),
                     onChanged: (v) => _toggle(v == true)),
           ),
           Expanded(
@@ -3196,17 +3232,17 @@ class _TodoTileState extends State<TodoTile> {
                   Wrap(spacing: 10, runSpacing: 2, crossAxisAlignment: WrapCrossAlignment.center, children: [
                     if (t.when.isNotEmpty)
                       Row(mainAxisSize: MainAxisSize.min, children: [
-                        const Icon(Icons.alarm, size: 13, color: K.todo),
+                        Icon(Icons.alarm, size: 13, color: K.todo),
                         const SizedBox(width: 3),
-                        Text(t.when, style: const TextStyle(fontSize: 12.5, color: K.todo)),
+                        Text(t.when, style: TextStyle(fontSize: 12.5, color: K.todo)),
                       ]),
-                    if (t.who.isNotEmpty) Text('谁去做：${t.who}', style: const TextStyle(fontSize: 12.5, color: K.mute)),
+                    if (t.who.isNotEmpty) Text('谁去做：${t.who}', style: TextStyle(fontSize: 12.5, color: K.mute)),
                   ]),
                 ],
                 const SizedBox(height: 2),
                 InkWell(
                   onTap: widget.onOpen,
-                  child: Text('${t.source} ›', style: const TextStyle(fontSize: 12.5, color: K.accent)),
+                  child: Text('${t.source} ›', style: TextStyle(fontSize: 12.5, color: K.accent)),
                 ),
               ]),
             ),
@@ -3218,7 +3254,7 @@ class _TodoTileState extends State<TodoTile> {
               onPressed: _adding ? null : _remind,
               icon: _adding
                   ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Icon(Icons.add_alert_outlined, size: 18, color: K.mute),
+                  : Icon(Icons.add_alert_outlined, size: 18, color: K.mute),
             ),
         ]),
       ),
@@ -3307,7 +3343,7 @@ class WeekColumn extends StatelessWidget {
                           ),
                         ),
                         if (busy)
-                          const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: K.accent))
+                          SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: K.accent))
                         else
                           Icon(Icons.chevron_right, size: 18, color: nudge ? K.todo : K.accent),
                       ]),
@@ -3320,9 +3356,9 @@ class WeekColumn extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.fromLTRB(8, 14, 8, 6),
                 child: Row(children: [
-                  Text(dayTitle(g.key, short: true), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: K.mute)),
+                  Text(dayTitle(g.key, short: true), style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: K.mute)),
                   const SizedBox(width: 8),
-                  const Expanded(child: Divider(color: K.line)),
+                  Expanded(child: Divider(color: K.line)),
                 ]),
               ),
               for (final s in g.value) SceneRow(scene: s, selected: s.id == selected, onTap: () => onPick(s)),
@@ -3381,15 +3417,15 @@ Widget _mdCard(String md) => Container(
 Widget _busyRow(String t) => Padding(
       padding: const EdgeInsets.symmetric(vertical: 12),
       child: Row(children: [
-        const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: K.accent)),
+        SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: K.accent)),
         const SizedBox(width: 8),
-        Flexible(child: Text(t, style: const TextStyle(fontSize: 13.5, color: K.mute))),
+        Flexible(child: Text(t, style: TextStyle(fontSize: 13.5, color: K.mute))),
       ]),
     );
 
 Widget _errorText(String e) => Padding(
       padding: const EdgeInsets.only(bottom: 8),
-      child: SelectableText('没生成成：$e', style: const TextStyle(fontSize: 13.5, height: 1.6, color: K.todo)),
+      child: SelectableText('没生成成：$e', style: TextStyle(fontSize: 13.5, height: 1.6, color: K.todo)),
     );
 
 String _readOr(File? f) {
@@ -3420,7 +3456,7 @@ class WeekReview extends StatelessWidget {
           return ListView(key: PageStorageKey(job), padding: EdgeInsets.fromLTRB(32, top, 32, 32), children: [
             Wrap(spacing: 14, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
               const Chip2('每周回顾'),
-              Text('${week.key} · ${week.label}', style: const TextStyle(fontSize: 13, color: K.faint)),
+              Text('${week.key} · ${week.label}', style: TextStyle(fontSize: 13, color: K.faint)),
             ]),
             const SizedBox(height: 10),
             Text('${week.label} 回顾', style: K.title(26).copyWith(color: K.ink)),
@@ -3435,9 +3471,9 @@ class WeekReview extends StatelessWidget {
               _mdCard(md),
             ] else if (!busy) ...[
               Text(week.isOver(DateTime.now()) ? '这周还没回顾。' : '这周还没过完，现在生成只包括到目前为止的录音。',
-                  style: const TextStyle(fontSize: 14, color: K.mute, height: 1.7)),
+                  style: TextStyle(fontSize: 14, color: K.mute, height: 1.7)),
               const SizedBox(height: 4),
-              const Text('回顾会写：这周概览、推进了什么、答应了谁什么、新冒出的观点、下周要盯的。存在资料文件夹的「每周」里。',
+              Text('回顾会写：这周概览、推进了什么、答应了谁什么、新冒出的观点、下周要盯的。存在资料文件夹的「每周」里。',
                   style: TextStyle(fontSize: 12.5, color: K.faint, height: 1.6)),
               const SizedBox(height: 12),
               Align(
@@ -3491,7 +3527,7 @@ class IdeasView extends StatelessWidget {
             const SizedBox(height: 2),
             const Squiggle(width: 96),
             const SizedBox(height: 8),
-            const Text('把「观点库」里按时间记下的观点，按主题归并：核心观点（标出处日期）、例子和金句、可以讲成演讲的提纲。',
+            Text('把「观点库」里按时间记下的观点，按主题归并：核心观点（标出处日期）、例子和金句、可以讲成演讲的提纲。',
                 style: TextStyle(fontSize: 12.5, color: K.faint, height: 1.6)),
             const SizedBox(height: 8),
             if (err != null) _errorText(err),

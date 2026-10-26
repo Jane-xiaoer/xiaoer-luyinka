@@ -158,7 +158,7 @@ class _RecSheetState extends State<RecSheet> {
                           const SizedBox(height: 4),
                           Text(
                             '${sourceOf(widget.stem)} · ${recDuration(widget.seconds)}${status.isEmpty ? '' : ' · $status'}',
-                            style: const TextStyle(color: K.mute, fontSize: 13),
+                            style: TextStyle(color: K.mute, fontSize: 13),
                           ),
                         ],
                       ),
@@ -166,7 +166,7 @@ class _RecSheetState extends State<RecSheet> {
                     IconButton(
                       tooltip: '关闭',
                       onPressed: () => Navigator.pop(context),
-                      icon: const Icon(Icons.close_rounded, color: K.mute),
+                      icon: Icon(Icons.close_rounded, color: K.mute),
                     ),
                   ],
                 ),
@@ -186,7 +186,7 @@ class _RecSheetState extends State<RecSheet> {
                   padding: const EdgeInsets.fromLTRB(24, 2, 24, 0),
                   child: Text(
                     hint,
-                    style: const TextStyle(color: K.faint, fontSize: 12),
+                    style: TextStyle(color: K.faint, fontSize: 12),
                   ),
                 ),
               if (hasAudio)
@@ -213,7 +213,7 @@ class _RecSheetState extends State<RecSheet> {
                       const SizedBox(width: 8),
                       Text(
                         _t(mine ? _player.pos : Duration.zero),
-                        style: const TextStyle(fontSize: 12.5, color: K.mute),
+                        style: TextStyle(fontSize: 12.5, color: K.mute),
                       ),
                       Expanded(
                         child: Slider(
@@ -230,14 +230,14 @@ class _RecSheetState extends State<RecSheet> {
                       ),
                       Text(
                         recDuration(widget.seconds),
-                        style: const TextStyle(fontSize: 12.5, color: K.mute),
+                        style: TextStyle(fontSize: 12.5, color: K.mute),
                       ),
                       const SizedBox(width: 8),
                     ],
                   ),
                 ),
               if (lines.isNotEmpty)
-                const Padding(
+                Padding(
                   padding: EdgeInsets.fromLTRB(24, 8, 24, 4),
                   child: Text(
                     '点哪句，就从哪句开始播',
@@ -251,7 +251,7 @@ class _RecSheetState extends State<RecSheet> {
                           hasAudio
                               ? '没转出文字（可能没人说话），可以听一下原声'
                               : '还没转成文字：拉下来、转写好了这里就能看',
-                          style: const TextStyle(color: K.mute),
+                          style: TextStyle(color: K.mute),
                         ),
                       )
                     : ListView.builder(
@@ -278,7 +278,7 @@ class _RecSheetState extends State<RecSheet> {
                                   width: 66,
                                   child: Text(
                                     lines[i][0],
-                                    style: const TextStyle(
+                                    style: TextStyle(
                                       color: K.faint,
                                       fontSize: 12.5,
                                       height: 1.75,
@@ -288,7 +288,7 @@ class _RecSheetState extends State<RecSheet> {
                                 Expanded(
                                   child: Text(
                                     lines[i][1],
-                                    style: const TextStyle(
+                                    style: TextStyle(
                                       color: K.ink,
                                       fontSize: 14.5,
                                       height: 1.65,

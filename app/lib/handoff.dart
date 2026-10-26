@@ -97,7 +97,7 @@ void showHandoff(BuildContext context, Store store, String? day, List<Scene> sce
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Text('把 ${dayTitle(day)} 交给…', style: K.title(20)),
           const SizedBox(height: 4),
-          Text('${scenes.length} 个场景，带要点、要办的和逐字稿', style: const TextStyle(color: K.mute)),
+          Text('${scenes.length} 个场景，带要点、要办的和逐字稿', style: TextStyle(color: K.mute)),
           const SizedBox(height: 16),
           if (claude != null) _Dest(Icons.terminal, 'Claude Code', '按你的整理规则，放进你的工作台 / 飞书',
               () => _runAgent(ctx, store, day, scenes, claude, 'Claude Code')),
@@ -141,12 +141,12 @@ class _Dest extends StatelessWidget {
         padding: const EdgeInsets.only(bottom: 8),
         child: Material(
           color: K.paper,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: const BorderSide(color: K.line)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: K.line)),
           child: ListTile(
             minTileHeight: 60,
             leading: Icon(icon, color: K.accent),
             title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
-            subtitle: Text(sub, style: const TextStyle(color: K.mute, fontSize: 13)),
+            subtitle: Text(sub, style: TextStyle(color: K.mute, fontSize: 13)),
             onTap: onTap,
           ),
         ),

@@ -7,7 +7,7 @@ class MdView extends StatelessWidget {
   final String md;
   const MdView(this.md, {super.key});
 
-  static const _body = TextStyle(fontSize: 14.5, height: 1.75, color: K.ink);
+  static final _body = TextStyle(fontSize: 14.5, height: 1.75, color: K.ink);
 
   @override
   Widget build(BuildContext context) {
@@ -29,7 +29,7 @@ class MdView extends StatelessWidget {
       } else if (t.startsWith('### ')) {
         out.add(Padding(
             padding: const EdgeInsets.only(top: 10, bottom: 2),
-            child: _rich(t.substring(4), const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: K.ink, height: 1.6))));
+            child: _rich(t.substring(4), TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: K.ink, height: 1.6))));
       } else if (t.startsWith('## ') || t.startsWith('# ')) {
         out.add(Padding(
           padding: EdgeInsets.only(top: out.isEmpty ? 0 : 18, bottom: 6),
@@ -39,7 +39,7 @@ class MdView extends StatelessWidget {
         out.add(Container(
           margin: const EdgeInsets.only(bottom: 6),
           padding: const EdgeInsets.fromLTRB(12, 4, 8, 4),
-          decoration: const BoxDecoration(border: Border(left: BorderSide(color: K.accentEdge, width: 3))),
+          decoration: BoxDecoration(border: Border(left: BorderSide(color: K.accentEdge, width: 3))),
           child: _rich(t.substring(2), _body.copyWith(color: K.mute)),
         ));
       } else if (RegExp(r'^[-*] \[[ xX]\] ').hasMatch(t)) {
@@ -48,7 +48,7 @@ class MdView extends StatelessWidget {
       } else if (RegExp(r'^[-*•] ').hasMatch(t)) {
         out.add(_item(
             Container(width: 5, height: 5, margin: const EdgeInsets.only(top: 4),
-                decoration: const BoxDecoration(color: K.accent, shape: BoxShape.circle)),
+                decoration: BoxDecoration(color: K.accent, shape: BoxShape.circle)),
             t.substring(2),
             indent: l.length - t.length));
       } else if (RegExp(r'^\d+[.、] ').hasMatch(t)) {
@@ -78,7 +78,7 @@ class MdView extends StatelessWidget {
       decoration: BoxDecoration(border: Border.all(color: K.line), borderRadius: BorderRadius.circular(10)),
       clipBehavior: Clip.antiAlias,
       child: Table(
-        border: const TableBorder(horizontalInside: BorderSide(color: K.line)),
+        border: TableBorder(horizontalInside: BorderSide(color: K.line)),
         defaultVerticalAlignment: TableCellVerticalAlignment.top,
         columnWidths: {
           // 按每列最长的字数分宽度（「事项」宽、「负责人 / 截止」窄）
@@ -94,7 +94,7 @@ class MdView extends StatelessWidget {
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
                     child: _rich(c < r.length ? r[c] : '',
-                        i == 0 ? const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: K.mute) : _body.copyWith(fontSize: 14)),
+                        i == 0 ? TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: K.mute) : _body.copyWith(fontSize: 14)),
                   ),
               ],
             ),
@@ -113,8 +113,8 @@ class MdView extends StatelessWidget {
       spans.add(m[1] != null
           ? TextSpan(text: m[1], style: const TextStyle(fontWeight: FontWeight.w700))
           : m[2] != null
-              ? TextSpan(text: m[2], style: const TextStyle(color: K.mute))
-              : TextSpan(text: m[3], style: const TextStyle(color: K.accent)));
+              ? TextSpan(text: m[2], style: TextStyle(color: K.mute))
+              : TextSpan(text: m[3], style: TextStyle(color: K.accent)));
       at = m.end;
     }
     if (at < s.length) spans.add(TextSpan(text: s.substring(at)));

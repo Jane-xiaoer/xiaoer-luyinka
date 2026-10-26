@@ -100,7 +100,7 @@ class _BeanViewState extends State<BeanView> {
           const SizedBox(height: 14),
           _list(context, files),
           const SizedBox(height: 12),
-          const Text(
+          Text(
             '先「拉下来看看」：拉到电脑、转成文字，点开就能看全文、听原声，再决定导入录音卡还是不要。'
             '导入了的，录音卡里原稿和转写都存好，才能把豆子上的删掉。蓝牙拉得慢，长录音要多等一会儿，断了下次接着拉。',
             style: TextStyle(color: K.faint, fontSize: 12, height: 1.7),
@@ -152,7 +152,7 @@ class _BeanViewState extends State<BeanView> {
           label: const Text('刷新'),
           style: OutlinedButton.styleFrom(
             foregroundColor: K.ink,
-            side: const BorderSide(color: K.lineStrong),
+            side: BorderSide(color: K.lineStrong),
           ),
         ),
       ],
@@ -183,7 +183,7 @@ class _BeanViewState extends State<BeanView> {
     Widget meta(String k, String v) => Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(k, style: const TextStyle(color: K.faint, fontSize: 11.5)),
+        Text(k, style: TextStyle(color: K.faint, fontSize: 11.5)),
         const SizedBox(height: 2),
         Text(
           v,
@@ -201,7 +201,7 @@ class _BeanViewState extends State<BeanView> {
                 width: 104,
                 height: 104,
                 alignment: Alignment.center,
-                decoration: const BoxDecoration(
+                decoration: BoxDecoration(
                   color: K.blush,
                   shape: BoxShape.circle,
                 ),
@@ -235,7 +235,7 @@ class _BeanViewState extends State<BeanView> {
                       ],
                     ),
                     const SizedBox(height: 4),
-                    const Text(
+                    Text(
                       '安克 AI 录音豆（D3200 · 飞书版）',
                       style: TextStyle(color: K.mute, fontSize: 12.5),
                     ),
@@ -282,7 +282,7 @@ class _BeanViewState extends State<BeanView> {
                 label: const Text('全部拉下来'),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: K.ink,
-                  side: const BorderSide(color: K.lineStrong),
+                  side: BorderSide(color: K.lineStrong),
                 ),
               ),
               OutlinedButton.icon(
@@ -295,12 +295,12 @@ class _BeanViewState extends State<BeanView> {
                 ),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: K.ink,
-                  side: const BorderSide(color: K.lineStrong),
+                  side: BorderSide(color: K.lineStrong),
                 ),
               ),
               PopupMenuButton<String>(
                 tooltip: '更多',
-                icon: const Icon(Icons.more_horiz_rounded, color: K.mute),
+                icon: Icon(Icons.more_horiz_rounded, color: K.mute),
                 color: K.card,
                 onSelected: (v) {
                   if (v == 'auto') bean.setAuto(!bean.auto);
@@ -324,7 +324,7 @@ class _BeanViewState extends State<BeanView> {
             const SizedBox(height: 8),
             Text(
               bean.error!,
-              style: const TextStyle(color: K.accent, fontSize: 12),
+              style: TextStyle(color: K.accent, fontSize: 12),
             ),
           ],
         ],
@@ -379,7 +379,7 @@ class _BeanViewState extends State<BeanView> {
             ),
             Text(
               pct == null ? '—' : '电量 $pct%${charging ? ' · 充电中' : ''}',
-              style: const TextStyle(color: K.mute, fontSize: 12),
+              style: TextStyle(color: K.mute, fontSize: 12),
             ),
           ],
         ),
@@ -425,7 +425,7 @@ class _BeanViewState extends State<BeanView> {
                 i == null
                     ? '—'
                     : '${gb(i.totalKB - i.freeKB)} / ${gb(i.totalKB)}',
-                style: const TextStyle(color: K.mute, fontSize: 12.5),
+                style: TextStyle(color: K.mute, fontSize: 12.5),
               ),
             ],
           ),
@@ -444,12 +444,12 @@ class _BeanViewState extends State<BeanView> {
             children: [
               Text(
                 i == null ? '' : '已用 ${(used * 100).toStringAsFixed(1)}%',
-                style: const TextStyle(color: K.faint, fontSize: 12),
+                style: TextStyle(color: K.faint, fontSize: 12),
               ),
               const Spacer(),
               Text(
                 i == null ? '' : '剩余 ${gb(i.freeKB)}',
-                style: const TextStyle(color: K.faint, fontSize: 12),
+                style: TextStyle(color: K.faint, fontSize: 12),
               ),
             ],
           ),
@@ -472,13 +472,13 @@ class _BeanViewState extends State<BeanView> {
               style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
             ),
             const SizedBox(width: 8),
-            Text('${files.length}', style: const TextStyle(color: K.faint)),
+            Text('${files.length}', style: TextStyle(color: K.faint)),
             const Spacer(),
             Flexible(
               child: Text(
                 _summary(files),
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: K.mute, fontSize: 12),
+                style: TextStyle(color: K.mute, fontSize: 12),
               ),
             ),
           ],
@@ -497,7 +497,7 @@ class _BeanViewState extends State<BeanView> {
                 onSelected: (_) => setState(() => _filter = k),
                 showCheckmark: false,
                 selectedColor: K.cardDeep,
-                side: const BorderSide(color: K.line),
+                side: BorderSide(color: K.line),
                 labelStyle: TextStyle(
                   fontSize: 12.5,
                   color: _filter == k ? K.ink : K.mute,
@@ -514,7 +514,7 @@ class _BeanViewState extends State<BeanView> {
             child: Center(
               child: Text(
                 bean.mac == null ? '还没连过录音豆：开着放在电脑旁边，点「刷新」' : '还没读到录音列表，点「刷新」',
-                style: const TextStyle(color: K.mute),
+                style: TextStyle(color: K.mute),
               ),
             ),
           ),
@@ -522,7 +522,7 @@ class _BeanViewState extends State<BeanView> {
             in files
                 .where((f) => _filter == '全部' || _kind(f) == _filter)
                 .indexed) ...[
-          if (k > 0) const Divider(height: 1, color: K.line),
+          if (k > 0) Divider(height: 1, color: K.line),
           _row(context, f),
         ],
       ],
@@ -591,7 +591,7 @@ class _BeanViewState extends State<BeanView> {
                         children: [
                           Text(
                             f.recording ? '正在录' : beanDuration(f.seconds),
-                            style: const TextStyle(
+                            style: TextStyle(
                               color: K.mute,
                               fontSize: 12.5,
                             ),
@@ -612,7 +612,7 @@ class _BeanViewState extends State<BeanView> {
                           text.isEmpty ? '（没转出文字，可能没人说话；点开能听原声）' : text,
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
+                          style: TextStyle(
                             color: K.mute,
                             fontSize: 13.5,
                             height: 1.5,
@@ -698,7 +698,7 @@ class _BeanViewState extends State<BeanView> {
     final canAct = !bean.busy && !bean.off;
     final pill = OutlinedButton.styleFrom(
       foregroundColor: K.ink,
-      side: const BorderSide(color: K.lineStrong),
+      side: BorderSide(color: K.lineStrong),
       visualDensity: VisualDensity.compact,
     );
     if (f.recording) return const [];
@@ -711,7 +711,7 @@ class _BeanViewState extends State<BeanView> {
     Widget bin(String tip, VoidCallback go) => IconButton(
       tooltip: tip,
       onPressed: canAct ? go : null,
-      icon: const Icon(Icons.delete_outline_rounded, color: K.accent, size: 20),
+      icon: Icon(Icons.delete_outline_rounded, color: K.accent, size: 20),
     );
     if (bean.reviewing(f)) {
       return [
@@ -772,7 +772,7 @@ class _BeanViewState extends State<BeanView> {
   void _openDetail(BuildContext context, BeanFile f) {
     final red = OutlinedButton.styleFrom(
       foregroundColor: K.accent,
-      side: const BorderSide(color: K.lineStrong),
+      side: BorderSide(color: K.lineStrong),
     );
     final dark = FilledButton.styleFrom(
       backgroundColor: K.ink,
@@ -865,7 +865,7 @@ class _BeanViewState extends State<BeanView> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(c, true),
-            child: const Text('不要了', style: TextStyle(color: K.accent)),
+            child: Text('不要了', style: TextStyle(color: K.accent)),
           ),
         ],
       ),
@@ -903,7 +903,7 @@ class _BeanViewState extends State<BeanView> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(c, true),
-            child: const Text('删掉', style: TextStyle(color: K.accent)),
+            child: Text('删掉', style: TextStyle(color: K.accent)),
           ),
         ],
       ),

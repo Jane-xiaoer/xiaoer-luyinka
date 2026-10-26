@@ -32,11 +32,11 @@ void showCardPicker(BuildContext context, Syncer syncer) {
         content: SizedBox(
           width: 420,
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const Text('把你的卡拿到设备旁边，一般排第一个、标着「最近」的就是。选好以后只连这一张。',
+            Text('把你的卡拿到设备旁边，一般排第一个、标着「最近」的就是。选好以后只连这一张。',
                 style: TextStyle(color: K.mute, fontSize: 13, height: 1.5)),
             const SizedBox(height: 12),
             if (scanning)
-              const Padding(
+              Padding(
                 padding: EdgeInsets.symmetric(vertical: 18),
                 child: Row(children: [
                   SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: K.accent)),
@@ -45,7 +45,7 @@ void showCardPicker(BuildContext context, Syncer syncer) {
                 ]),
               )
             else if (list.isEmpty)
-              const Padding(
+              Padding(
                 padding: EdgeInsets.symmetric(vertical: 18),
                 child: Text('附近没找到卡。确认卡开着机、没在录音，再找一次。', style: TextStyle(color: K.mute)),
               )
@@ -58,7 +58,7 @@ void showCardPicker(BuildContext context, Syncer syncer) {
                   title: Text(c.label, style: const TextStyle(fontWeight: FontWeight.w600)),
                   subtitle: Text(
                     [if (i == 0 && list.length > 1) '最近', if (c.id == syncer.boundId) '现在用的', _near(c.rssi)].join(' · '),
-                    style: const TextStyle(color: K.faint, fontSize: 12),
+                    style: TextStyle(color: K.faint, fontSize: 12),
                   ),
                   onTap: () {
                     syncer.bind(c);

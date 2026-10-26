@@ -57,6 +57,7 @@ Future<void> main() async {
   await dir.create(recursive: true);
   final store = Store(dir);
   await store.load();
+  skin.value = skins.firstWhere((k) => k.key == store.settings['skin'], orElse: () => girlSkin);
   // 资料文件夹在 iCloud 上、有文件被挪到云上了：请系统在后台下载回来，下回来了再读一遍
   if (Platform.isMacOS) {
     const files = MethodChannel('luyinka/files');
@@ -115,10 +116,16 @@ class LuyinkaApp extends StatelessWidget {
   const LuyinkaApp({super.key, required this.store, required this.syncer, required this.live, this.bean});
 
   @override
-  Widget build(BuildContext context) => MaterialApp(
-    title: '小耳录音卡',
-    debugShowCheckedModeBanner: false,
-    theme: buildTheme(),
-    home: Home(store: store, syncer: syncer, live: live, bean: bean, askOwnKey: true),
+  Widget build(BuildContext context) => ValueListenableBuilder(
+    valueListenable: skin, // 换皮肤：整个界面按新配色重画
+    builder: (_, s, _) => MaterialApp(
+      title: '小耳录音卡',
+      debugShowCheckedModeBanner: false,
+      theme: buildTheme(),
+      home: KeyedSubtree(
+        key: ValueKey(s.key),
+        child: Home(store: store, syncer: syncer, live: live, bean: bean, askOwnKey: true),
+      ),
+    ),
   );
 }
