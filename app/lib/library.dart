@@ -9,7 +9,7 @@
 //   录音/<录音>.m4a                        播放用
 //   模板/<类别>.md                         各类别的整理方式，可以直接改
 //   模板/一键按钮.md、模板/我的写作风格.md     「拿去用」按钮的要求、让小耳写东西时照着的口吻
-//   模板/常用词.md                         常提到的人名 / 品牌 / 专有名词，整理时照它纠正转写里的错字
+//   词汇表.md                              常提到的人名 / 品牌 / 专有名词：现场会议出字、录音转写、整理时照它纠正听错的字
 //   成稿/2026-10-19 14.05 标题.md           对话里小耳写好、点了「存成稿」的东西
 //   .xiaoer/<录音>.json                    App 用的索引（删了 App 里就看不到那条，但上面的文件还在）
 import 'dart:convert';
@@ -45,7 +45,8 @@ class Library {
   Directory get weeksDir => Directory('$path/每周');
   File get quickActionsFile => File('$path/模板/一键按钮.md');
   File get styleFile => File('$path/模板/我的写作风格.md');
-  File get vocabFile => File('$path/模板/常用词.md');
+  File get vocabFile => File('$path/词汇表.md');
+  File get _oldVocab => File('$path/模板/常用词.md'); // 以前放在这、叫「常用词」
   File get polishFile => File('$path/模板/会议笔记·顺一下.md');
   Directory get liveDir => Directory('$path/现场会议');
 
@@ -70,7 +71,16 @@ class Library {
     }
     if (!await quickActionsFile.exists()) await quickActionsFile.writeAsString(quickActionsMd(quickActions));
     if (!await styleFile.exists()) await styleFile.writeAsString(defaultStyle);
-    if (!await vocabFile.exists()) await vocabFile.writeAsString(defaultVocab);
+    // 一份词汇表：以前在 模板/常用词.md（现场会议里叫「词库」），搬到资料文件夹最外层、统一叫词汇表
+    try {
+      if (!await vocabFile.exists() && await _oldVocab.exists()) {
+        final old = await _oldVocab.readAsString();
+        await vocabFile.writeAsString(old.replaceFirst(RegExp(r'^# 常用词'), '# 词汇表').replaceAll('「词库」', '「词汇表」')
+            .replaceAll('没有常用词', '没有词'));
+        await _oldVocab.delete();
+      }
+    } catch (_) {} // 旧文件被 iCloud 挪到云上读不出：先不搬，下次再说
+    if (!await vocabFile.exists() && !await _oldVocab.exists()) await vocabFile.writeAsString(defaultVocab);
     if (!await polishFile.exists() || legacyPolish.map((x) => x.trim()).contains(await read(polishFile))) {
       await polishFile.writeAsString(defaultPolish); // 没改过的旧默认换成新的
     }
@@ -89,7 +99,7 @@ class Library {
 - 逐字稿/、录音/：全文和原声
 - 模板/：每一类怎么整理。直接改这些 .md，下次整理就按你改过的来
 - 模板/一键按钮.md：每一类下面「拿去用」按钮让小耳写什么；模板/我的写作风格.md：让小耳写文章、朋友圈时照着的口吻
-- 模板/常用词.md：你常提到的人名、品牌、专有名词，整理时照它把转写里听错的字改回来
+- 词汇表.md：你常提到的人名、品牌、专有名词。现场会议出字、录音转写、整理时都照它把听错的字改回来（App 设置和现场会议里也能改）
 - 模板/会议笔记·顺一下.md：现场会议里「顺一下」怎么帮你理笔记
 - 现场会议/：现场会议里你自己记的笔记（原话全文在 逐字稿/）
 - 成稿/：在对话里让小耳写好的文章、朋友圈、纪要消息，点「存成稿」存在这
@@ -133,7 +143,7 @@ class Library {
     }
   }
 
-  /// 常用词（去掉说明后的内容；没写就是空）。
+  /// 词汇表（去掉说明后的内容；没写就是空）。
   String vocab() {
     try {
       return vocabFile.existsSync() ? cleanVocab(vocabFile.readAsStringSync()) : '';
@@ -142,7 +152,7 @@ class Library {
     }
   }
 
-  /// 词库（模板/常用词.md）里的词：现场会议出字时替换、「词库」窗口里编辑。
+  /// 词汇表（词汇表.md）里的词：现场会议出字、录音转写时替换，「词汇表」窗口里编辑。
   List<VocabEntry> vocabEntries() {
     try {
       return vocabFile.existsSync() ? parseVocab(vocabFile.readAsStringSync()).$1 : [];
@@ -151,7 +161,7 @@ class Library {
     }
   }
 
-  /// 存词库：只换掉「- 词」那些行，文件里别的正文原样留着。
+  /// 存词汇表：只换掉「- 词」那些行，文件里别的正文原样留着。
   Future<void> saveVocab(List<VocabEntry> entries) async {
     final extra = await vocabFile.exists() ? parseVocab(await vocabFile.readAsString()).$2 : <String>[];
     await vocabFile.writeAsString(vocabMd(entries, extra));

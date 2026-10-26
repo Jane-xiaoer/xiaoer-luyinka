@@ -34,7 +34,7 @@ const _maxGapPad = Duration(minutes: 30); // 暂停后接着录：中间补静�
 class LiveLine {
   final DateTime at;
   final DateTime? end; // 这句说完的时刻（旧草稿里没有）
-  String text; // 词库改了会就地换掉听错的词
+  String text; // 词汇表改了会就地换掉听错的词
   String? speaker; // 谁说的；null = 不知道
   bool auto; // true = 小耳按声纹猜的（可能会随着你多标几句改过来）；false = 你亲手标的，不再动
   final Float32List? emb; // 这句的声纹（太短的句子没有）
@@ -420,7 +420,7 @@ class LiveSession extends ChangeNotifier {
   final LiveModels models;
   final Voices voices; // 声纹库：跨会议记得谁是谁
   bool speakerOff = false; // 声纹模型没下下来：这场不自动认人
-  List<VocabEntry>? _vocab; // 词库：出字时把听错的换掉
+  List<VocabEntry>? _vocab; // 词汇表：出字时把听错的换掉
   List<VocabEntry> get vocab => _vocab ??= store.lib.vocabEntries();
   final Future<void> Function() afterSave; // 收进录音卡后让同步器跑一轮（整理）
   final bool shareMemory; // 收进去时顺手写共享记忆（ccrag）；测试里关掉
@@ -614,6 +614,7 @@ class LiveSession extends ChangeNotifier {
     if (state == LiveState.recording || state == LiveState.preparing || state == LiveState.saving) return;
     state = LiveState.preparing;
     status = null;
+    _vocab = null; // 词汇表可能在设置里改过：每场开录重新读
     notifyListeners();
     try {
       if (!await _recorder.hasPermission()) throw Exception('没有麦克风权限：去系统设置里允许「小耳录音卡」使用麦克风');
@@ -851,9 +852,9 @@ class LiveSession extends ChangeNotifier {
     notifyListeners();
   }
 
-  // ───────── 词库 ─────────
+  // ───────── 词汇表 ─────────
 
-  /// 存词库，并把这场已经出来的原话按新词库改一遍。返回改了几句。
+  /// 存词汇表，并把这场已经出来的原话按新词汇表改一遍。返回改了几句。
   Future<int> saveVocab(List<VocabEntry> entries) async {
     await store.lib.saveVocab(entries);
     _vocab = store.lib.vocabEntries();
@@ -919,7 +920,7 @@ class LiveSession extends ChangeNotifier {
     var said = [for (final l in lines) l.said].join('\n');
     if (said.length > 30000) said = '…（前面省略）\n${said.substring(said.length - 30000)}';
     final vocab = lib.vocab();
-    final system = [lib.polishPrompt(), if (vocab.isNotEmpty) '\n## 常用词（转写听错时照这里改）\n$vocab'].join('\n');
+    final system = [lib.polishPrompt(), if (vocab.isNotEmpty) '\n## 词汇表（转写听错时照这里改）\n$vocab'].join('\n');
     final user = [
       '## 会议标题\n$title',
       '## 我的笔记\n${notes.trim().isEmpty ? '（还没记）' : notes.trim()}',

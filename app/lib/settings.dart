@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'cards.dart';
 import 'cloud.dart';
 import 'handoff.dart';
+import 'live_view.dart' show VocabDialog;
 import 'llm.dart';
 import 'store.dart';
 import 'sync.dart';
@@ -102,7 +103,7 @@ void showSettings(BuildContext context, Store store, Syncer syncer) {
               const SizedBox(height: 16),
               const Text('资料文件夹', style: TextStyle(fontWeight: FontWeight.w600)),
               const SizedBox(height: 2),
-              const Text('整理好的笔记、逐字稿、录音都在这，是普通文件，不开 App 也能看。「模板」文件夹里改每一类怎么整理；「改写作风格」写你的口吻，小耳写文章、朋友圈时照着写；「改常用词」写你常提到的人名、品牌，整理时照它纠正转写里的错字。',
+              const Text('整理好的笔记、逐字稿、录音都在这，是普通文件，不开 App 也能看。「模板」文件夹里改每一类怎么整理；「改写作风格」写你的口吻，小耳写文章、朋友圈时照着写；「词汇表」写你常提到的人名、品牌，现场会议出字、录音转写和整理时都照它纠正听错的字。',
                   style: TextStyle(color: K.mute, fontSize: 13)),
               // 手机上这一栏改不了（disabled 的单行框不能横着滚），路径又长：折行显示全
               TextField(controller: folder, enabled: Platform.isMacOS, maxLines: Platform.isMacOS ? 1 : null, style: const TextStyle(fontSize: 14)),
@@ -129,12 +130,15 @@ void showSettings(BuildContext context, Store store, Syncer syncer) {
                   ),
                   TextButton.icon(
                     onPressed: () async {
-                      final f = store.lib.vocabFile;
-                      if (!await f.exists()) await f.writeAsString(defaultVocab);
-                      await Process.run('open', [f.path]);
+                      // 一份词汇表：现场会议出字、录音转写、整理都用它（资料文件夹/词汇表.md）
+                      final entries = await showDialog<List<VocabEntry>>(
+                        context: ctx,
+                        builder: (_) => VocabDialog(initial: store.lib.vocabEntries()),
+                      );
+                      if (entries != null) await store.lib.saveVocab(entries);
                     },
                     icon: const Icon(Icons.spellcheck, size: 16),
-                    label: const Text('改常用词'),
+                    label: const Text('词汇表'),
                   ),
                   TextButton.icon(
                     onPressed: () async {

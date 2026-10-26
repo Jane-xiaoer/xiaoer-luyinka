@@ -61,4 +61,18 @@ void main() {
     await lib.ensure();
     expect(lib.vocabFile.readAsStringSync(), defaultVocab);
   });
+
+  test('以前的 模板/常用词.md 搬成资料文件夹最外层的 词汇表.md，词一个不少', () async {
+    final tmp = await Directory.systemTemp.createTemp('vocabmove');
+    final lib = Library(Directory('${tmp.path}/资料'));
+    await Directory('${lib.path}/模板').create(recursive: true);
+    await File('${lib.path}/模板/常用词.md').writeAsString('# 常用词\n> 说明\n- 小耳老师（常被听成 小冉老师）\n- Omia\n');
+    await lib.ensure();
+    expect(File('${lib.path}/模板/常用词.md').existsSync(), isFalse);
+    expect(lib.vocabFile.path, endsWith('/资料/词汇表.md'));
+    expect(lib.vocabFile.readAsStringSync(), startsWith('# 词汇表'));
+    expect(lib.vocabEntries().map((e) => e.word), ['小耳老师', 'Omia']);
+    expect(lib.vocabEntries().first.wrong, ['小冉老师']);
+    await tmp.delete(recursive: true);
+  });
 }

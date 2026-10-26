@@ -304,7 +304,7 @@ class _LiveViewState extends State<LiveView> {
     );
     if (entries == null || !mounted) return;
     final n = await live.saveVocab(entries);
-    if (mounted) _toast(n > 0 ? '词库存好了，这场里改对了 $n 句' : '词库存好了，之后出的字按它改');
+    if (mounted) _toast(n > 0 ? '词汇表存好了，这场里改对了 $n 句' : '词汇表存好了，之后出的字按它改');
   }
 
   Future<void> _copyNotes() async {
@@ -457,7 +457,7 @@ class _LiveViewState extends State<LiveView> {
             TextButton.icon(
               onPressed: _openVocab,
               icon: const Icon(Icons.menu_book_outlined, size: 17, color: K.mute),
-              label: const Text('词库：开会前先把常被听错的词填好', style: TextStyle(color: K.mute)),
+              label: const Text('词汇表：开会前先把常被听错的词填好', style: TextStyle(color: K.mute)),
             ),
           ],
         ),
@@ -580,7 +580,7 @@ class _LiveViewState extends State<LiveView> {
             child: const Text('放弃', style: TextStyle(color: K.faint)),
           ),
         IconButton(
-          tooltip: '词库：常被听错的词',
+          tooltip: '词汇表：常被听错的词',
           onPressed: _openVocab,
           icon: const Icon(Icons.menu_book_outlined, size: 20, color: K.mute),
         ),
@@ -936,7 +936,7 @@ class LiveDot extends StatelessWidget {
   );
 }
 
-/// 词库窗口：每行一个词，「常被听成」可以写几个（顿号分开）。存进 模板/常用词.md。
+/// 词汇表窗口：每行一个词，「常被听成」可以写几个（顿号分开）。存进 资料文件夹的 词汇表.md。
 class VocabDialog extends StatefulWidget {
   final List<VocabEntry> initial;
   const VocabDialog({super.key, required this.initial});
@@ -975,7 +975,7 @@ class _VocabDialogState extends State<VocabDialog> {
   @override
   Widget build(BuildContext context) => AlertDialog(
     backgroundColor: K.card,
-    title: Text('词库', style: K.title(20)),
+    title: Text('词汇表', style: K.title(20)),
     content: SizedBox(
       width: 520,
       child: Column(
