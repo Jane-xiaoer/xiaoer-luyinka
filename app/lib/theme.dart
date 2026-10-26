@@ -76,8 +76,8 @@ const glassSkin = Skin(
   key: 'glass',
   name: '深色玻璃',
   dark: true,
-  sage: Color(0x33000000), // 左栏、窗口底：薄薄压一层暗，底下的渐变壁纸透上来
-  card: Color(0x8C141418), // 内容面板：半透明深灰 + 背后模糊 = 磨砂玻璃
+  sage: Color(0x1A000000), // 左栏、窗口底：几乎透明，底下的蓝光透上来
+  card: Color(0xB30B0E15), // 内容面板：半透明近黑（带一点蓝）+ 背后模糊 = 磨砂玻璃
   cardDeep: Color(0x12FFFFFF),
   line: Color(0x1FFFFFFF),
   lineStrong: Color(0x33FFFFFF),
@@ -358,18 +358,27 @@ String duration(Duration d) {
   return h > 0 ? '$h 小时 $m 分' : (d.inMinutes > 0 ? '${d.inMinutes} 分钟' : '${d.inSeconds} 秒');
 }
 
-/// 深色玻璃的壁纸：近黑底上几团大光斑（橙 → 洋红 → 靛蓝），像 Mac 的渐变壁纸，玻璃面板浮在上面。
+/// 深色玻璃的壁纸：几乎全黑，左栏那一溜透出科技蓝的光（像屏幕边上打了一道蓝光），右下角再淡淡一点蓝，别的地方都是黑。
 class GlassBackdrop extends StatelessWidget {
   const GlassBackdrop({super.key});
 
   @override
   Widget build(BuildContext context) => DecoratedBox(
-        decoration: const BoxDecoration(color: Color(0xFF0A0A12)),
-        child: Stack(fit: StackFit.expand, children: const [
-          _Glow(Alignment(-1.1, 1.2), Color(0xFFFF6A1A), 1.3), // 左下：橙
-          _Glow(Alignment(0.2, 0.9), Color(0xFFE0337A), 1.1), // 下方：洋红
-          _Glow(Alignment(1.2, -0.9), Color(0xFF3B3BFF), 1.2), // 右上：靛蓝
-          _Glow(Alignment(-0.6, -1.3), Color(0xFF7A2BD6), 0.9), // 左上：紫
+        decoration: const BoxDecoration(color: Color(0xFF04060B)),
+        child: Stack(fit: StackFit.expand, children: [
+          // 左栏一溜蓝：从最左边往右慢慢淡掉，到左栏边上就没了
+          const DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.centerLeft,
+                end: Alignment(-0.45, 0),
+                colors: [Color(0x591E6BFF), Color(0x1F0A84FF), Color(0x0004060B)],
+                stops: [0, 0.55, 1],
+              ),
+            ),
+          ),
+          const _Glow(Alignment(-1.0, -0.35), Color(0xFF1E6BFF), 0.75), // 左栏中上：一团亮一点的蓝
+          const _Glow(Alignment(1.15, 1.2), Color(0xFF0A84FF), 0.7), // 右下：很淡的蓝
         ]),
       );
 }
@@ -385,7 +394,7 @@ class _Glow extends StatelessWidget {
           gradient: RadialGradient(
             center: at,
             radius: radius,
-            colors: [color.withValues(alpha: 0.75), color.withValues(alpha: 0.0)],
+            colors: [color.withValues(alpha: 0.45), color.withValues(alpha: 0.0)],
           ),
         ),
       );
