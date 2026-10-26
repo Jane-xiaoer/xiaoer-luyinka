@@ -163,7 +163,13 @@ class LiveModels {
     }
   }
 
-  Future<void> ensure(void Function(String what, double? frac) progress) async {
+  /// 同一时间只下一份（后台自动下 和 开现场会议时下 撞在一起会写坏同一个文件）
+  static final _ensuring = <String, Future<void>>{};
+
+  Future<void> ensure(void Function(String what, double? frac) progress) =>
+      _ensuring[dir.path] ??= _ensure(progress).whenComplete(() => _ensuring.remove(dir.path));
+
+  Future<void> _ensure(void Function(String what, double? frac) progress) async {
     await ensureVad();
     for (final (f, urls) in [
       (tokens, ['https://huggingface.co/$_hf/tokens.txt', 'https://hf-mirror.com/$_hf/tokens.txt']),

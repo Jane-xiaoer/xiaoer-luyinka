@@ -10,8 +10,10 @@ import 'card/client.dart';
 import 'card/protocol.dart';
 import 'cloud.dart';
 import 'llm.dart';
+import 'local_asr.dart';
 import 'progress.dart';
 import 'store.dart';
+import 'templates.dart' show fixWords;
 import 'todos.dart';
 
 typedef LinkFactory = Future<Link?> Function(String id); // 只连这一张；不在旁边返回 null
@@ -61,7 +63,10 @@ class Syncer {
   late final Llm llm;
   Chat? chat; // 测试时换成假的
 
-  Syncer(this.store, this.cloud, this.connect, this.scan, this.timezone, {this.chat, this.partBytes = defaultPartBytes})
+  /// 本机转写（Mac、模型下好了）：有就先用它，没有 / 出错再传云端
+  final LocalAsr? local;
+  Syncer(this.store, this.cloud, this.connect, this.scan, this.timezone,
+      {this.chat, this.partBytes = defaultPartBytes, this.local})
       : assert(partBytes % frameBytes == 0) {
     llm = Llm(cloud, () => Map<String, dynamic>.from(store.settings['llm'] ?? {}));
     cloud.onToken = (t) {
@@ -147,7 +152,10 @@ class Syncer {
       }
       cloud.token ??= store.settings['token'] as String?;
       if (cloud.token == null) {
-        store.settings['token'] = await cloud.register();
+        // 登记不上（没网）也接着走：拉卡、本机转写都不靠云端；要云端的那几步各自报错、下轮再试
+        try {
+          store.settings['token'] = await cloud.register();
+        } catch (_) {}
       }
       if (fromCard) await _pull();
       await _upload();
@@ -272,6 +280,7 @@ class Syncer {
 
   /// 拉卡的同时：攒够一段就在后台传上去（不挡着拉卡）。传失败了 30 秒内不再试，拉完那一下会补传。
   void _kick(Rec r, File src) {
+    if (local?.ready == true) return; // 本机转写：不用边拉边往云端传
     if (_pumpBusy || r.got < (r.sent + 1) * partBytes) return;
     if (_pumpFailed != null && DateTime.now().difference(_pumpFailed!).inSeconds < 30) return;
     _pumpBusy = true;
@@ -333,6 +342,18 @@ class Syncer {
     for (final r in store.recs.values.where((r) => r.stage == 'pulled' || (r.stage == 'error' && r.job == null)).toList()) {
       final f = store.raw(r.stem);
       if (!await f.exists()) continue;
+      if (local?.ready == true && r.job == null) {
+        // 本机转写：快，也不用上传；出错了再走下面的云端
+        try {
+          await _local(r, f);
+          continue;
+        } catch (e) {
+          r
+            ..stage = 'pulled'
+            ..error = '本机转写没成功，改传云端：$e';
+          _changed();
+        }
+      }
       r.stage = 'uploading';
       _changed();
       try {
@@ -357,25 +378,12 @@ class Syncer {
       r.progress = (j['progress'] as num?)?.toInt() ?? r.progress;
       if (j['status'] == 'done') {
         final res = Map<String, dynamic>.from(j['result']);
-        final lines = [for (final x in (res['lines'] as List? ?? const [])) List<String>.from(x)];
-        await store.lib.writeTranscript(r.stem, (res['start'] ?? '').toString(), lines);
         try {
           await store.audio(r.stem).writeAsBytes(await cloud.audio(r.job!));
         } catch (_) {}
-        final old = (res['scenes'] as List?)?.isNotEmpty == true; // 旧版云端已经切好了
-        await store.putResult(r.stem, {...res, 'scenes': res['scenes'] ?? []});
+        await _done(r, res);
         await cloud.delete(r.job!).catchError((_) {}); // 取走了，云端删掉
-        final raw = store.raw(r.stem);
-        if (await raw.exists()) await raw.delete();
-        r
-          ..stage = r.stem.startsWith('bean') && !old
-              ? 'review' // 录音豆的：先在录音豆页给用户看内容（没转出字也一样），导不导入由用户定
-              : old || lines.isEmpty
-                  ? 'done'
-                  : 'transcribed'
-          ..job = null
-          ..progress = 0
-          ..error = null;
+        r.job = null;
       } else if (j['status'] == 'error') {
         r
           ..stage = 'error'
@@ -383,6 +391,41 @@ class Syncer {
       }
       _changed();
     }
+  }
+
+  /// 在本机转一条（[LocalAsr]）：结果跟云端一样，后面一样处理。
+  Future<void> _local(Rec r, File f) async {
+    r
+      ..stage = 'processing'
+      ..progress = 0
+      ..error = null;
+    _changed();
+    final vocab = store.lib.vocabEntries();
+    final res = await local!.transcribe(f, r.stem, store.audio(r.stem), progress: (p) {
+      if (p != r.progress) {
+        r.progress = p;
+        onChange?.call();
+      }
+    }, fix: (t) => fixWords(t, vocab));
+    await _done(r, res);
+  }
+
+  /// 转写好了（本机或云端）：存逐字稿和索引、删原文件，排进下一步（录音豆的先等用户看）。播放用的 m4a 调用前已经放好。
+  Future<void> _done(Rec r, Map<String, dynamic> res) async {
+    final lines = [for (final x in (res['lines'] as List? ?? const [])) List<String>.from(x)];
+    await store.lib.writeTranscript(r.stem, (res['start'] ?? '').toString(), lines);
+    final old = (res['scenes'] as List?)?.isNotEmpty == true; // 旧版云端已经切好了
+    await store.putResult(r.stem, {...res, 'scenes': res['scenes'] ?? []});
+    final raw = store.raw(r.stem);
+    if (await raw.exists()) await raw.delete();
+    r
+      ..stage = r.stem.startsWith('bean') && !old
+          ? 'review' // 录音豆的：先在录音豆页给用户看内容（没转出字也一样），导不导入由用户定
+          : old || lines.isEmpty
+              ? 'done'
+              : 'transcribed'
+      ..progress = 0
+      ..error = null;
   }
 
   /// 不是卡上来的录音（小耳语音按三道杠说的长口述等）：别的程序在本机转写好，放进

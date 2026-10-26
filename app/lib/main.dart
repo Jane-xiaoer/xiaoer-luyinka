@@ -11,6 +11,7 @@ import 'card/ble.dart';
 import 'cloud.dart';
 import 'home.dart';
 import 'live.dart';
+import 'local_asr.dart';
 import 'store.dart';
 import 'sync.dart';
 import 'theme.dart';
@@ -41,6 +42,17 @@ Future<void> main() async {
     await systemAudioSelfTest(int.parse(secs), wav);
     exit(0);
   }
+  // 自检录音本机转写（不开界面）：LUYINKA_LOCAL_ASR_TEST="<原文件>|<录音名>|<结果 json>"
+  final asrTest = Platform.environment['LUYINKA_LOCAL_ASR_TEST'];
+  if (asrTest != null && asrTest.contains('|')) {
+    final [raw, stem, out] = asrTest.split('|');
+    final appDir = Directory('${(await getApplicationSupportDirectory()).path}/luyinka');
+    final sw = Stopwatch()..start();
+    final res = await LocalAsr(LiveModels(appDir)).transcribe(File(raw), stem, File('$out.m4a'));
+    res['用时秒'] = sw.elapsedMilliseconds / 1000;
+    File(out).writeAsStringSync(const JsonEncoder.withIndent(' ').convert(res));
+    exit(0);
+  }
   final dir = Directory('${(await getApplicationSupportDirectory()).path}/luyinka');
   await dir.create(recursive: true);
   final store = Store(dir);
@@ -54,6 +66,7 @@ Future<void> main() async {
     });
   }
   final cloud = Cloud((store.settings['cloud'] as String?) ?? defaultCloud, token: store.settings['token'] as String?);
+  final models = LiveModels(dir); // 现场会议和录音转写共用一套本机模型
   final syncer = Syncer(
     store,
     cloud,
@@ -64,6 +77,7 @@ Future<void> main() async {
     },
     () async => [for (final d in await BleLink.scan()) CardChoice(d.deviceId, BleLink.label(d), d.rssi)],
     deviceTimezone,
+    local: LocalAsr(models),
   );
   // 现场会议：收进录音卡后让同步器跑一轮，把它排进整理
   final live = LiveSession(store, dir, () => syncer.run(fromCard: false));
@@ -71,6 +85,8 @@ Future<void> main() async {
   final bean = BeanSyncer(store, () => syncer.run(fromCard: false));
   runApp(LuyinkaApp(store: store, syncer: syncer, live: live, bean: bean));
   syncer.start();
+  // Mac：本机识别模型（约 240MB）后台悄悄下好，录音就能在本机转（快很多）；没下好之前照常传云端
+  if (Platform.isMacOS && !models.ready) unawaited(models.ensure((_, _) {}).catchError((_) {}));
   bean.start();
 }
 
