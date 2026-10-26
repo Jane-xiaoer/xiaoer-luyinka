@@ -1,4 +1,39 @@
-# 小耳录音卡（长时录音卡 → 转写 → 场景 → 你的 agent）
+# 小耳录音卡
+
+把随身录音变成能用的资料：**录音卡 / 安克 AI 录音豆 / 现场会议（含腾讯会议等线上会议）** → 本机转写 → 按类别整理成笔记（会议纪要、听课笔记、个人感悟……）→ 一天一页、能问、能交给你的 AI。
+
+- **App**（`app/`，Flutter，一套代码出 Mac + 安卓）：下载页 https://luyinka.xiaoeromia.com:8443/
+- **转写在你自己的电脑上做**（SenseVoice，第一次用时自动下载约 270MB 模型），不花钱、声音不出电脑；云端只当备用
+- **整理和问答用大模型**：在 App「设置」里填你自己的 key（DeepSeek / 通义千问 / Kimi / 智谱 / OpenAI 或任何 OpenAI 兼容接口）。没填之前用作者提供的体验额度（每天有限）
+- **数据都是普通文件**：资料文件夹（默认 文稿/小耳录音卡）里全是 Markdown，Obsidian 直接当仓库打开；
+  别的 AI 读 `给AI的接口.md` 就会查、会改（往 `.xiaoer/commands/` 放命令）
+
+## 拿去改
+
+许可证：**GPL-3.0**（可以随便改、自己用；改了再发布也要开源，见 `LICENSE`）。
+
+```bash
+cd app && flutter pub get
+flutter run -d macos          # 或 flutter build apk
+flutter test                  # 200 多个测试
+```
+
+- 云端（`server/`，Python）：转写备用 + 体验额度的大模型中转。自己部署：`server/deploy.sh <你的服务器>`，
+  然后编译 App 时 `--dart-define=LUYINKA_CLOUD=https://你的地址`（不改的话默认连作者的服务器）
+- 命令行版 + MCP（`luyinka/`、`install.sh`）：不用 App，Mac 上自动拉卡、转写、交给你的 agent，见下面「开箱即用」
+- 发版脚本 `app/release-mac.sh` 里的签名证书、公证凭据是作者的，换成你自己的
+
+## 关于录音豆
+
+`app/lib/bean/` 是安克 AI 录音豆（D3200，飞书版）的非官方接入：蓝牙直连、拉录音、解密。协议是自己逆向的
+（参考了 Soundcore Manager 的研究），**跟安克、飞书没有任何关系**，可能随固件更新失效。仅供拥有设备的人管理自己的录音。
+
+录音卡的协议资料来自卖家提供的 SDK（`vendor/`）。
+
+---
+
+以下是开发笔记。
+
 
 目标：出门磁吸手机录音，回家 Mac 自动拉文件 + 本地转写（SenseVoice / mlx-whisper），不交飞书 68 元/月。
 
