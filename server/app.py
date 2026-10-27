@@ -16,6 +16,8 @@
     POST /v1/ask    {"question", "scenes":[…]} → {"answer"}           「问问我的录音」（旧版 App）
     POST /v1/transcribe  body=16k 单声道 s16le 裸 PCM（一句话） → {"text"}   只转写不切场景（小耳经纪人🎙边说边转借用）
     GET  /healthz
+    GET  /v1/latest                           → {"version", "notes", "mac"|"android"|"android_old": {"url", "size", "sha256"}}
+                                                App 的「有新版」提醒 + 一键更新用；版本号从下载目录的文件名里读（小耳录音卡-<版本>….dmg/.apk）
     GET  /                                    下载页（Mac 安装包 + 安卓 APK，放在 <DATA>/download/）
     GET  /download/<文件>
 
@@ -30,6 +32,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import hmac
 import json
 import os
@@ -464,6 +467,40 @@ ol{{color:#4f6a64;line-height:1.9;padding-left:20px}} ol li::marker{{color:#d95e
 </main></body></html>"""
 
 
+_SHA: dict[tuple[str, float], str] = {}
+
+
+def _sha256(p: Path) -> str:
+    k = (p.name, p.stat().st_mtime)
+    if k not in _SHA:
+        h = hashlib.sha256()
+        with open(p, "rb") as f:
+            for b in iter(lambda: f.read(1 << 20), b""):
+                h.update(b)
+        _SHA[k] = h.hexdigest()
+    return _SHA[k]
+
+
+def latest() -> dict:
+    """下载页上现在放的那一版。更新说明写在 <DATA>/download/更新说明.txt（可没有）。"""
+    d = DATA / "download"
+    files = sorted((p for p in d.iterdir() if p.is_file()), key=lambda p: p.stat().st_mtime, reverse=True) if d.exists() else []
+    pick = {
+        "mac": next((p for p in files if p.suffix == ".dmg"), None),
+        "android": next((p for p in files if p.suffix == ".apk" and "老手机" not in p.name), None),
+        "android_old": next((p for p in files if p.suffix == ".apk" and "老手机" in p.name), None),
+    }
+    out: dict = {}
+    for k, p in pick.items():
+        if p:
+            out[k] = {"url": f"/download/{quote(p.name)}", "size": p.stat().st_size, "sha256": _sha256(p)}
+    m = re.search(r"-(\d+(?:\.\d+)+)", (pick["mac"] or pick["android"] or Path("")).name)
+    out["version"] = m.group(1) if m else ""
+    notes = d / "更新说明.txt"
+    out["notes"] = notes.read_text(encoding="utf-8").strip() if notes.is_file() else ""
+    return out
+
+
 # ───────── HTTP ─────────
 
 class H(BaseHTTPRequestHandler):
@@ -494,6 +531,8 @@ class H(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         if u.path == "/healthz":
             return self.send(200, {"ok": True, "queue": JOBS.qsize(), "stream": 1})
+        if u.path == "/v1/latest":
+            return self.send(200, latest())
         if u.path in ("/", "/download", "/download/"):
             return self.send(200, download_page().encode(), "text/html; charset=utf-8")
         if u.path in ("/icon.png", "/favicon.ico"):

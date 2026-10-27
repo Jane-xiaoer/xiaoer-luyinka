@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 自动更新下好的安装包（临时文件夹 = cacheDir）交给系统安装界面 -->
+<paths>
+    <cache-path name="update" path="luyinka-update/" />
+</paths>

@@ -32,6 +32,7 @@ import 'templates.dart';
 import 'theme.dart';
 import 'todos.dart';
 import 'transcript.dart';
+import 'update.dart';
 import 'weekly.dart';
 
 class Home extends StatefulWidget {
@@ -125,6 +126,11 @@ class _HomeState extends State<Home> {
     if (sec != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) => showSettings(context, store, widget.syncer, section: sec));
     }
+    Updater.instance.blocker = () => widget.live.active ? '正在开现场会议，开完再更新（不然录音会断）' : null;
+    Updater.instance.start().then((_) {
+        // 远程测试机自检一键更新（点不了鼠标）：LUYINKA_UPDATE_SELFTEST=1 发现新版就直接装
+      if (Platform.environment['LUYINKA_UPDATE_SELFTEST'] == '1') Updater.instance.install();
+    });
     final scroll = Platform.environment['LUYINKA_SCROLL_SELFTEST'];
     if (scroll != null) {
       scrollSelfTest(scroll,
@@ -389,6 +395,7 @@ class _HomeState extends State<Home> {
       body: SafeArea(
         child: Column(children: [
           if (!wide) TopBar(syncer: widget.syncer, store: store, onHandoff: _handoff),
+          if (!wide) const UpdateBar(compact: true),
           Expanded(
             // Mac 顶上 34pt 拖窗口由 MainFlutterWindow.swift 接管，那条里别放按钮
             child: wide ? _wide() : _narrow(),
@@ -396,6 +403,7 @@ class _HomeState extends State<Home> {
           if (wide)
             ListenableBuilder(
                 listenable: player, builder: (_, _) => player.stem == null ? const SizedBox() : PlayerBar(player: player)),
+          if (wide) const UpdateBar(),
         ]),
       ),
     );
@@ -688,6 +696,67 @@ String pullLine(Rec r) {
 }
 
 bool _live(Syncer syncer, Store store) => syncer.card.connected || store.pending.isNotEmpty;
+
+// ───────── 有新版：一条提醒，点「现在更新」就下载、核对、换好、重新打开（update.dart） ─────────
+
+class UpdateBar extends StatelessWidget {
+  final bool compact; // 手机窄屏：放顶栏下面
+  const UpdateBar({super.key, this.compact = false});
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+        listenable: Updater.instance,
+        builder: (context, _) {
+          final u = Updater.instance;
+          if (!u.show) return const SizedBox.shrink();
+          final msg = u.status ?? (u.notes.isEmpty ? '修了一些问题，用起来更顺。' : u.notes.split('\n').first);
+          final text = Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+            Text('有新版 ${u.version}', style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700, color: K.ink)),
+            const SizedBox(height: 2),
+            Text(msg,
+                maxLines: compact ? 2 : 1, overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 12.5, color: u.failed ? K.accent : K.mute, height: 1.4)),
+            if (u.progress != null) ...[
+              const SizedBox(height: 6),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(99),
+                child: LinearProgressIndicator(value: u.progress, minHeight: 4, color: K.live, backgroundColor: K.lineStrong),
+              ),
+            ],
+          ]);
+          final buttons = Row(mainAxisSize: MainAxisSize.min, children: [
+            if (!u.busy) TextButton(onPressed: u.dismiss, style: TextButton.styleFrom(foregroundColor: K.mute), child: const Text('以后再说')),
+            const SizedBox(width: 4),
+            FilledButton(
+              onPressed: u.busy ? null : u.install,
+              style: FilledButton.styleFrom(backgroundColor: K.accent, visualDensity: VisualDensity.compact),
+              child: Text(u.busy ? '更新中…' : '现在更新'),
+            ),
+          ]);
+          return Container(
+            margin: compact ? const EdgeInsets.fromLTRB(12, 6, 12, 2) : const EdgeInsets.fromLTRB(12, 0, 12, 10),
+            padding: const EdgeInsets.fromLTRB(16, 10, 10, 10),
+            decoration: BoxDecoration(
+              color: K.card,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: K.accentEdge),
+            ),
+            child: compact
+                ? Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                    Row(children: [Icon(Icons.system_update_alt_rounded, size: 20, color: K.accent), const SizedBox(width: 10), Expanded(child: text)]),
+                    Align(alignment: Alignment.centerRight, child: buttons),
+                  ])
+                : Row(children: [
+                    Icon(Icons.system_update_alt_rounded, size: 20, color: K.accent),
+                    const SizedBox(width: 12),
+                    Expanded(child: text),
+                    const SizedBox(width: 12),
+                    buttons,
+                  ]),
+          );
+        },
+      );
+}
 
 // ───────── 处理中横幅：有录音在路上就一直挂在列表顶上，说清在干嘛、等多久、卡没卡住 ─────────
 
