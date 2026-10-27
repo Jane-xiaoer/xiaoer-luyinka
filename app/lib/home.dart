@@ -2189,24 +2189,26 @@ class _SceneDetailState extends State<SceneDetail> {
       );
 
   /// 逐字稿每一行：点时间从那里听，正在播的那行高亮。
-  Widget _lines(Scene s, TextStyle body) => ListenableBuilder(
-        listenable: player,
-        builder: (_, _) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          for (final line in s.text)
-            Container(
+  /// 一行一个 ListView 子项（长录音几百行，只画看得见的）；播放器走一下只重画这一行的底色，字不重排。
+  List<Widget> _lines(Scene s, TextStyle body) => [
+        for (final line in s.text)
+          ListenableBuilder(
+            listenable: player,
+            builder: (_, child) => Container(
               margin: const EdgeInsets.only(bottom: 6),
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
               decoration: BoxDecoration(
                   color: player.stem == s.stem && player.label == line[0] ? K.accentSoft : Colors.transparent,
                   borderRadius: BorderRadius.circular(6)),
-              child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                _ts(line[0]),
-                const SizedBox(width: 8),
-                Expanded(child: SelectableText(line[1], style: body)),
-              ]),
+              child: child,
             ),
-        ]),
-      );
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              _ts(line[0]),
+              const SizedBox(width: 8),
+              Expanded(child: SelectableText(line[1], style: body)),
+            ]),
+          ),
+      ];
 
   @override
   Widget build(BuildContext context) => ValueListenableBuilder<bool>(
@@ -2216,15 +2218,17 @@ class _SceneDetailState extends State<SceneDetail> {
 
   /// 这一段的逐字稿拷贝按钮：纯文字 / 带时间 / 整条录音；Mac 上还有「在 Finder 显示」。
   Widget _tools(Scene s) {
-    final plain = transcriptText(s);
+    // 长录音全文几万字：点了再拼，别每次重画都拼一遍
+    final empty = transcriptText(s).isEmpty;
     final same = store.scenesOf(s.stem);
-    final whole = recordingTranscript(same.isEmpty ? [s] : same);
+    final whole = same.isEmpty ? [s] : same;
     final file = store.hasLib ? store.lib.transcript(s.stem) : null;
     return Wrap(spacing: 6, runSpacing: 6, children: [
-      _btn('拷贝', Icons.copy_rounded, plain.isEmpty ? null : () => _copy(plain), tip: '这一段，纯文字，一行一句'),
-      _btn('带时间拷贝', Icons.schedule, plain.isEmpty ? null : () => _copy(transcriptText(s, times: true)),
+      _btn('拷贝', Icons.copy_rounded, empty ? null : () => _copy(transcriptText(s)), tip: '这一段，纯文字，一行一句'),
+      _btn('带时间拷贝', Icons.schedule, empty ? null : () => _copy(transcriptText(s, times: true)),
           tip: '每行前面带 [时:分:秒]'),
-      _btn('整条录音', Icons.library_books_outlined, whole.isEmpty ? null : () => _copy(whole),
+      _btn('整条录音', Icons.library_books_outlined,
+          whole.every((x) => transcriptText(x).isEmpty) ? null : () => _copy(recordingTranscript(whole)),
           tip: '这一段所在整条录音的全部逐字稿，按段分开'),
       if (Platform.isMacOS && file != null)
         _btn('在 Finder 显示', Icons.folder_open_outlined,
@@ -2289,7 +2293,7 @@ class _SceneDetailState extends State<SceneDetail> {
         const SizedBox(height: 8),
         Text('点时间从那里听', style: TextStyle(fontSize: 12, color: K.faint)),
         const SizedBox(height: 8),
-        if (s.text.isEmpty) Text('这段没有逐字稿。', style: TextStyle(color: K.faint)) else _lines(s, body),
+        if (s.text.isEmpty) Text('这段没有逐字稿。', style: TextStyle(color: K.faint)) else ..._lines(s, body),
       ]);
     }
     return ListView(key: PageStorageKey(s.id), padding: EdgeInsets.fromLTRB(32, widget.top, 32, 32), children: [
@@ -2342,7 +2346,7 @@ class _SceneDetailState extends State<SceneDetail> {
         _tools(s),
       ]),
       const SizedBox(height: 8),
-      _lines(s, body),
+      ..._lines(s, body),
     ]);
   }
 }
