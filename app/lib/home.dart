@@ -23,6 +23,7 @@ import 'llm.dart';
 import 'md_view.dart';
 import 'people.dart';
 import 'progress.dart';
+import 'scroll_selftest.dart';
 import 'search.dart';
 import 'settings.dart';
 import 'store.dart';
@@ -116,12 +117,21 @@ class _HomeState extends State<Home> {
       if (mounted) setState(() {});
     };
     WidgetsBinding.instance.addPostFrameCallback((_) => _askOwnKey());
-    // 截图 / 自检用：LUYINKA_START_MODE=7 打开就进录音卡页（6 录音豆、5 现场会议、3 待办…）；SETTINGS=1 打开设置
+    // 截图 / 自检用：LUYINKA_START_MODE=7 打开就进录音卡页（6 录音豆、5 现场会议、3 待办…）；SETTINGS=1 打开设置；
+    // LUYINKA_SCROLL_SELFTEST=<json> 长录音右栏滚到底 + 打开设置，结果写进 json
     final m = int.tryParse(Platform.environment['LUYINKA_START_MODE'] ?? '');
     if (m != null) _mode = m;
     final sec = Platform.environment['LUYINKA_START_SETTINGS'];
     if (sec != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) => showSettings(context, store, widget.syncer, section: sec));
+    }
+    final scroll = Platform.environment['LUYINKA_SCROLL_SELFTEST'];
+    if (scroll != null) {
+      scrollSelfTest(scroll,
+          showTranscript: () => SceneDetail.transcriptTab.value = true,
+          tick: player.tick,
+          openSettings: () => showSettings(context, store, widget.syncer),
+          settingsOpen: () => shown((w) => w is SettingsDialog));
     }
     store.addListener(_onStore);
   }
@@ -2763,6 +2773,9 @@ class Player extends ChangeNotifier {
   }
 
   Future<void> toggle() => playing ? _p.pause() : _p.resume();
+
+  /// 自检用：当作播放进度走了一下（听着播放器的都刷新一遍）。
+  void tick() => notifyListeners();
   Future<void> seekTo(double frac) => _p.seek(total * frac);
 
   @override
