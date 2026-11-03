@@ -14,16 +14,14 @@ class MainFlutterWindow: NSWindow {
     blur.blendingMode = .behindWindow
     blur.state = .active
     blur.appearance = NSAppearance(named: .darkAqua)
-    let root = NSViewController()
-    root.view = NSView()
-    blur.frame = root.view.bounds
+    // Flutter 必须直接当窗口的内容。1.2.4 把它套进另一个 NSViewController 里，鼠标「按下/松开」就再也到不了
+    // Flutter（悬停还有，点哪都没反应：2026-11-03 实测 M2 上 PointerDown 一个都没有，不套就有）。
+    // 毛玻璃改成垫在 Flutter 画布下面的兄弟视图，点击照样落在 Flutter 上。
+    self.contentViewController = flutterViewController
+    let host = flutterViewController.view
+    blur.frame = host.bounds
     blur.autoresizingMask = [.width, .height]
-    root.view.addSubview(blur)
-    root.addChild(flutterViewController)
-    flutterViewController.view.frame = root.view.bounds
-    flutterViewController.view.autoresizingMask = [.width, .height]
-    root.view.addSubview(flutterViewController.view)
-    self.contentViewController = root
+    host.addSubview(blur, positioned: .below, relativeTo: nil)
     self.isOpaque = false
     self.backgroundColor = .clear
     // 默认 1280×820 居中；标题栏透明，App 自己的顶栏就是标题栏（红绿灯压在左上）
