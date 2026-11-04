@@ -169,8 +169,9 @@ void main() {
       if (ogg[i] == 0x4F &&
           ogg[i + 1] == 0x67 &&
           ogg[i + 2] == 0x67 &&
-          ogg[i + 3] == 0x53)
+          ogg[i + 3] == 0x53) {
         last = i;
+      }
     }
     expect(
       ByteData.sublistView(ogg, last + 6, last + 14).getInt64(0, Endian.little),

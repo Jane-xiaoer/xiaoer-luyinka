@@ -432,7 +432,7 @@ ButtonLayerBuilder? glassBg({Color? tint}) {
             : [BoxShadow(color: tint.withValues(alpha: 0.35), blurRadius: 14, offset: const Offset(0, 4))],
       ),
       child: Stack(alignment: Alignment.center, children: [
-        if (child != null) child,
+        ?child,
         // 顶边那道高光：中间亮、两头淡
         Positioned(
           top: 1,

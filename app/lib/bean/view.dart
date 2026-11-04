@@ -108,18 +108,20 @@ class _BeanViewState extends State<BeanView> {
 
   (String, Color) _status() {
     if (bean.off) return ('已暂停连接', K.faint);
-    if (bean.connected)
+    if (bean.connected) {
       return (
         bean.info?.recording == true
             ? '正在录音…'
             : (bean.phase.isEmpty ? '已连接' : bean.phase),
         K.live,
       );
+    }
     if (bean.busy) return (bean.phase.isEmpty ? '正在找…' : bean.phase, K.todo);
     if (bean.mac == null) return ('还没连过', K.faint);
     if (bean.error != null) return ('上次没连成，点「刷新」再试', K.accent);
-    if (bean.here == true && bean.lastSeen != null)
+    if (bean.here == true && bean.lastSeen != null) {
       return ('在旁边 · ${_hm(bean.lastSeen!)} 同步过', K.live);
+    }
     if (bean.here == null) return ('等着连…', K.faint);
     return ('不在旁边', K.faint);
   }

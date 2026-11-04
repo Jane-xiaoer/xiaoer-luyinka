@@ -17,6 +17,8 @@ import 'cards.dart';
 import 'drafts.dart';
 import 'handoff.dart';
 import 'ideas.dart';
+import 'iphone.dart';
+import 'iphone_view.dart';
 import 'live.dart';
 import 'live_view.dart';
 import 'llm.dart';
@@ -123,7 +125,10 @@ class _HomeState extends State<Home> {
     final m = int.tryParse(Platform.environment['LUYINKA_START_MODE'] ?? '');
     if (m != null) _mode = m;
     final sec = Platform.environment['LUYINKA_START_SETTINGS'];
-    if (sec != null) {
+    if (sec == '挑以前的录音' && VoiceMemoSyncer.instance != null) {
+      // LUYINKA_START_SETTINGS=挑以前的录音：直接打开 iPhone 语音备忘录的「挑以前的录音导入」
+      WidgetsBinding.instance.addPostFrameCallback((_) => showMemoPicker(context, VoiceMemoSyncer.instance!));
+    } else if (sec != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) => showSettings(context, store, widget.syncer, section: sec));
     }
     Updater.instance.blocker = () => widget.live.active ? '正在开现场会议，开完再更新（不然录音会断）' : null;
@@ -633,7 +638,7 @@ class _HomeState extends State<Home> {
           )));
 }
 
-/// 这条从哪来的：录音卡 / 录音豆 / 现场会议 / 小耳语音（小图标 + 字，不抢类别的颜色）。
+/// 这条从哪来的：录音卡 / 录音豆 / iPhone / 现场会议 / 小耳语音（小图标 + 字，不抢类别的颜色）。
 class SourceTag extends StatelessWidget {
   final String stem;
   const SourceTag(this.stem, {super.key});
@@ -643,6 +648,7 @@ class SourceTag extends StatelessWidget {
     final s = sourceOf(stem);
     final icon = switch (s) {
       '录音豆' => Icons.graphic_eq_rounded,
+      'iPhone' => Icons.phone_iphone_rounded,
       '现场会议' => Icons.mic_none_rounded,
       '小耳语音' => Icons.record_voice_over_outlined,
       _ => Icons.sd_card_outlined,

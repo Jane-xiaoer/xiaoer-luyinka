@@ -46,9 +46,11 @@ class Scene {
   String get dayKey => d['start'].toString().substring(0, 10);
 }
 
-/// 这条录音从哪来的（看名字前缀）：录音豆 / 现场会议 / 小耳语音 / 录音卡。
+/// 这条录音从哪来的（看名字前缀）：录音豆 / iPhone（语音备忘录）/ 现场会议 / 小耳语音 / 录音卡。
 String sourceOf(String stem) => stem.startsWith('bean')
     ? '录音豆'
+    : stem.startsWith('iphone')
+    ? 'iPhone'
     : stem.startsWith('live')
         ? '现场会议'
         : stem.startsWith('voice') || stem.startsWith('note')

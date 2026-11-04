@@ -1,5 +1,5 @@
 // 设置：左边分几块，右边是这一块的内容，每块只留一句话说明。
-//   外观（皮肤，点了马上换）· 大模型 · 词汇表 · 整理（模板 / 写作风格 / 交给 Agent 的规则）· 资料文件夹 · 设备与云端
+//   外观（皮肤，点了马上换）· 大模型 · 词汇表 · 整理（模板 / 写作风格 / 交给 Agent 的规则）· 资料文件夹 · 设备与云端（含 iPhone 语音备忘录）
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -7,6 +7,8 @@ import 'package:flutter/material.dart';
 import 'cards.dart';
 import 'cloud.dart';
 import 'handoff.dart';
+import 'iphone.dart';
+import 'iphone_view.dart';
 import 'live_view.dart' show VocabDialog;
 import 'llm.dart';
 import 'store.dart';
@@ -302,6 +304,10 @@ class _SettingsDialogState extends State<SettingsDialog> {
           onChanged: (v) => setState(() => deleteAfter = v),
           title: const Text('导入后删掉卡上的原文件'),
         ),
+        if (Platform.isMacOS && VoiceMemoSyncer.instance != null) ...[
+          const SizedBox(height: 6),
+          MemoSettings(VoiceMemoSyncer.instance!),
+        ],
         const SizedBox(height: 10),
         Text('云端地址', style: TextStyle(fontWeight: FontWeight.w600, color: K.ink)),
         TextField(controller: cloud, style: TextStyle(fontSize: 14, color: K.mute)),

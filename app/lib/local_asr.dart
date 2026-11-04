@@ -198,11 +198,12 @@ List<(double, String)> mergeLines(
   return out;
 }
 
-/// 开录时刻（本地墙上时间）：卡上「2026-10-18 07.40.00」、豆子「bean20261024110629」。认不出是 null。
+/// 开录时刻（本地墙上时间）：卡上「2026-10-18 07.40.00」、豆子「bean20261024110629」、iPhone「iphone20250122-175533」。认不出是 null。
 DateTime? startOf(String stem) {
   final card = RegExp(r'^(\d{4})-(\d\d)-(\d\d) (\d\d)\.(\d\d)\.(\d\d)').firstMatch(stem);
   final bean = RegExp(r'^bean(\d{4})(\d\d)(\d\d)(\d\d)(\d\d)(\d\d)').firstMatch(stem);
-  final m = card ?? bean;
+  final phone = RegExp(r'^iphone(\d{4})(\d\d)(\d\d)-(\d\d)(\d\d)(\d\d)').firstMatch(stem);
+  final m = card ?? bean ?? phone;
   if (m == null) return null;
   final v = [for (var i = 1; i <= 6; i++) int.parse(m[i]!)];
   return DateTime(v[0], v[1], v[2], v[3], v[4], v[5]);
@@ -218,15 +219,17 @@ String isoWithOffset(DateTime t) {
 }
 
 /// 卡上的裸 Opus 帧（每帧 40 字节）→ Ogg Opus（跟云端 opus_ogg.raw_to_ogg 一样，granule 按每包 TOC 算）。
-Uint8List cardOgg(Uint8List raw, {int frameBytes = _cardFrame}) {
-  final frames = [
-    for (var i = 0; i + frameBytes <= raw.length; i += frameBytes) Uint8List.sublistView(raw, i, i + frameBytes),
-  ];
+Uint8List cardOgg(Uint8List raw, {int frameBytes = _cardFrame}) => packetsOgg([
+      for (var i = 0; i + frameBytes <= raw.length; i += frameBytes) Uint8List.sublistView(raw, i, i + frameBytes),
+    ]);
+
+/// 一个个 Opus 包（长短不一也行）→ Ogg Opus。[preSkip] 是解码开头要丢掉的 48k 采样数。
+Uint8List packetsOgg(List<Uint8List> frames, {int preSkip = 312}) {
   const serial = 0x4C594B41;
   final out = BytesBuilder(copy: false);
   final head = BytesBuilder()
     ..add(ascii.encode('OpusHead'))
-    ..add([1, 1, 0x38, 0x01]) // 版本 1、单声道、预跳 312
+    ..add([1, 1, preSkip & 0xFF, preSkip >> 8 & 0xFF]) // 版本 1、单声道、预跳
     ..add(_le32(_rate))
     ..add([0, 0, 0]);
   final tags = BytesBuilder()
@@ -246,6 +249,47 @@ Uint8List cardOgg(Uint8List raw, {int frameBytes = _cardFrame}) {
   }
   if (frames.isEmpty) out.add(_page(serial, seq, 0, [], 4));
   return out.toBytes();
+}
+
+/// afconvert 出的 CAF（Opus）→ 一个个 Opus 包 + 预跳（48k 采样数）。
+/// CAF 每包的字节数记在 pakt 块里（变长整数），包本身连着放在 data 块（前 4 字节是编辑计数）。
+({List<Uint8List> packets, int preSkip}) cafOpus(Uint8List caf) {
+  if (caf.length < 8 || ascii.decode(caf.sublist(0, 4), allowInvalid: true) != 'caff') {
+    throw const FormatException('不是 CAF 文件');
+  }
+  final bd = ByteData.sublistView(caf);
+  var i = 8;
+  var rate = 48000.0;
+  Uint8List? pakt, data;
+  while (i + 12 <= caf.length) {
+    final type = ascii.decode(caf.sublist(i, i + 4), allowInvalid: true);
+    final body = i + 12;
+    var n = bd.getInt64(i + 4);
+    if (n < 0) n = caf.length - body; // data 块大小 -1 = 一直到文件尾
+    final end = body + n > caf.length ? caf.length : body + n;
+    if (type == 'desc') rate = bd.getFloat64(body);
+    if (type == 'pakt') pakt = Uint8List.sublistView(caf, body, end);
+    if (type == 'data') data = Uint8List.sublistView(caf, body + 4, end);
+    i = body + n;
+  }
+  if (pakt == null || data == null || pakt.length < 24) throw const FormatException('CAF 里没有包表或声音数据');
+  final pb = ByteData.sublistView(pakt);
+  final count = pb.getInt64(0);
+  final priming = pb.getInt32(16);
+  var p = 24, off = 0;
+  final out = <Uint8List>[];
+  for (var k = 0; k < count && p < pakt.length; k++) {
+    var v = 0;
+    while (p < pakt.length) {
+      final b = pakt[p++];
+      v = (v << 7) | (b & 0x7F);
+      if (b & 0x80 == 0) break;
+    }
+    if (off + v > data.length) break;
+    out.add(Uint8List.sublistView(data, off, off + v));
+    off += v;
+  }
+  return (packets: out, preSkip: (priming * 48000 / rate).round());
 }
 
 /// RFC 6716 §3.1：这一包解码后的 48k 采样数

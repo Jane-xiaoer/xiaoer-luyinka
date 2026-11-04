@@ -16,6 +16,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:luyinka/home.dart';
 import 'package:luyinka/library.dart';
+import 'package:luyinka/live.dart';
 import 'package:luyinka/progress.dart';
 import 'package:luyinka/store.dart';
 import 'package:luyinka/sync.dart';
@@ -210,7 +211,7 @@ class DemoApp extends StatelessWidget {
               ),
             );
           },
-          home: Home(store: store, syncer: syncer),
+          home: Home(store: store, syncer: syncer, live: LiveSession(store, store.dir, () async {}, shareMemory: false)),
         ),
       );
 }

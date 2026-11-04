@@ -28,9 +28,14 @@ class Analyzer {
     final secs = [for (final l in lines) _offset(t0, l[0])];
     final subjects = await lib.subjects();
     final vocab = lib.vocab();
+    // iPhone 语音备忘录上起的标题（常常就是地点）：当线索给模型
+    final memo = (res['memo'] ?? '').toString().trim();
     var raw = <Map<String, dynamic>>[];
     for (final (w, (lo, hi)) in windows(lines).indexed) {
-      final user = [for (var i = lo; i <= hi; i++) '[${lines[i][0]}] ${lines[i][1]}'].join('\n');
+      final user = [
+        if (memo.isNotEmpty) '（这条录音在 iPhone 上的标题：「$memo」，可当地点、事件的线索）',
+        for (var i = lo; i <= hi; i++) '[${lines[i][0]}] ${lines[i][1]}',
+      ].join('\n');
       for (final s in parseScenes(await chat(cutPrompt(subjects, vocab: vocab), user))) {
         var a = _clamp(t0, s['start'], secs[lo], secs[hi]), b = _clamp(t0, s['end'], secs[lo], secs[hi]);
         if (b < a) (a, b) = (b, a);

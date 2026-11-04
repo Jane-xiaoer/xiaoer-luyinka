@@ -256,8 +256,9 @@ class BeanCrypto {
     if (session == null || head.length < 97) return null;
     final plain = aesCtr(session!, head.sublist(79, 95), head.sublist(33, 79));
     if (ascii.decode(plain.sublist(0, 14), allowInvalid: true) !=
-        'soundcored3200')
+        'soundcored3200') {
       return null;
+    }
     return BeanFileKey(plain.sublist(14, 46), head.sublist(17, 29));
   }
 

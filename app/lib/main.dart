@@ -10,6 +10,7 @@ import 'bean/sync.dart';
 import 'card/ble.dart';
 import 'cloud.dart';
 import 'home.dart';
+import 'iphone.dart';
 import 'live.dart';
 import 'local_asr.dart';
 import 'store.dart';
@@ -68,15 +69,17 @@ Future<void> main() async {
   }
   final cloud = Cloud((store.settings['cloud'] as String?) ?? defaultCloud, token: store.settings['token'] as String?);
   final models = LiveModels(dir); // 现场会议和录音转写共用一套本机模型
+  // 自检用：LUYINKA_NO_DEVICES=1 不碰蓝牙（不找卡、不连录音豆），只跑转写整理和 iPhone 语音备忘录
+  final noBle = Platform.environment['LUYINKA_NO_DEVICES'] == '1';
   final syncer = Syncer(
     store,
     cloud,
-    (id) async {
+    noBle ? (_) async => null : (id) async {
       final link = await BleLink.find(id);
       if (link != null) store.settings['deviceName'] ??= BleLink.label(link.device); // 旧版只记了 id
       return link;
     },
-    () async => [for (final d in await BleLink.scan()) CardChoice(d.deviceId, BleLink.label(d), d.rssi)],
+    noBle ? () async => [] : () async => [for (final d in await BleLink.scan()) CardChoice(d.deviceId, BleLink.label(d), d.rssi)],
     deviceTimezone,
     local: LocalAsr(models),
   );
@@ -84,11 +87,16 @@ Future<void> main() async {
   final live = LiveSession(store, dir, () => syncer.run(fromCard: false));
   // 录音豆（安克 AI 录音豆 / 飞书版）：后台用蓝牙拉新录音，拉完交给 Syncer 转写整理
   final bean = BeanSyncer(store, () => syncer.run(fromCard: false));
+  // iPhone 语音备忘录（iCloud 同步到这台 Mac 的）：新录的收进来，交给 Syncer 转写整理
+  final memos = Platform.isMacOS
+      ? VoiceMemoSyncer.instance = VoiceMemoSyncer(store, VoiceMemos(VoiceMemos.defaultDir()), () => syncer.run(fromCard: false))
+      : null;
   runApp(LuyinkaApp(store: store, syncer: syncer, live: live, bean: bean));
   syncer.start();
   // Mac：本机识别模型（约 240MB）后台悄悄下好，录音就能在本机转（快很多）；没下好之前照常传云端
   if (Platform.isMacOS && !models.ready) unawaited(models.ensure((_, _) {}).catchError((_) {}));
-  bean.start();
+  if (!noBle) bean.start();
+  memos?.start();
 }
 
 /// 设备时区的 IANA 名：Flutter 只给得出 UTC 偏移，按偏移挑常用的（国内 +8 = 上海）。

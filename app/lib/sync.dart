@@ -9,6 +9,7 @@ import 'analyze.dart';
 import 'card/client.dart';
 import 'card/protocol.dart';
 import 'cloud.dart';
+import 'iphone.dart' show memoTitle;
 import 'llm.dart';
 import 'local_asr.dart';
 import 'progress.dart';
@@ -413,6 +414,8 @@ class Syncer {
   /// 转写好了（本机或云端）：存逐字稿和索引、删原文件，排进下一步（录音豆的先等用户看）。播放用的 m4a 调用前已经放好。
   Future<void> _done(Rec r, Map<String, dynamic> res) async {
     final lines = [for (final x in (res['lines'] as List? ?? const [])) List<String>.from(x)];
+    final memo = memoTitle(store, r.stem);
+    if (memo != null) res['memo'] = memo;
     await store.lib.writeTranscript(r.stem, (res['start'] ?? '').toString(), lines);
     final old = (res['scenes'] as List?)?.isNotEmpty == true; // 旧版云端已经切好了
     await store.putResult(r.stem, {...res, 'scenes': res['scenes'] ?? []});

@@ -206,8 +206,9 @@ class BeanClient implements BeanConn {
     final sub = _packets.stream.listen((p) {
       if (p.type != 0x1A && p.type != 0x1B || done.isCompleted) return;
       if (p.id == 0x07) {
-        if (p.raw.length < 97 || u32(p.raw, 9) != f.id)
+        if (p.raw.length < 97 || u32(p.raw, 9) != f.id) {
           return; // 别的文件的头（上一条的余波）
+        }
         key = _crypto!.fileKey(p.raw);
         total = u32(p.raw, 13) ~/ sliceBytes; // 头里的大小 = 块数 × 166
         bump();

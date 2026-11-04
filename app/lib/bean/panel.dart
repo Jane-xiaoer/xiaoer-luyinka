@@ -15,8 +15,9 @@ class BeanDot extends StatelessWidget {
       final pulling = bean.store.recs.values.any(
         (r) => r.stage == 'pulling' && r.stem.startsWith('bean'),
       );
-      if (!bean.connected && bean.here != true && !pulling)
+      if (!bean.connected && bean.here != true && !pulling) {
         return const SizedBox();
+      }
       return Container(
         width: 8,
         height: 8,
