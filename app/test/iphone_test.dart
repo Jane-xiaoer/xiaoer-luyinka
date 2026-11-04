@@ -46,6 +46,7 @@ void main() {
   var converted = <String>[];
   var secs = <String, double?>{}; // 文件名 → 假的实际时长（没写 = 跟 db 一样长）
   late DateTime clock;
+  var woke = 0;
 
   VoiceMemoSyncer syncer({Map<String, double>? dbSecs}) => VoiceMemoSyncer(
         store,
@@ -60,6 +61,7 @@ void main() {
           return secs.containsKey(n) ? secs[n] : 62.0;
         },
         now: () => clock,
+        wake: () async => woke++,
       );
 
   setUp(() async {
@@ -313,4 +315,54 @@ void main() {
       await d.delete(recursive: true);
     }
   }, skip: !Platform.isMacOS);
+
+  test('App 没开、只有后台同步时：声音在 _FBF 外部文件里也收；之后整理成 .m4a 也不重复收（认 ZUNIQUEID）', () async {
+    final s = syncer();
+    await s.run(); // 记起点
+    const u = '8264BF79-8F56-402C-89A0-483367F042C4';
+    final hex = '03232323' 'EC31020000000000' '${u.replaceAll('-', '')}'
+        '${u.codeUnits.map((c) => c.toRadixString(16).padLeft(2, '0')).join()}';
+    expect(externalRef(hex), '.CloudRecordings_SUPPORT/_FBF/$u');
+    expect(externalRef(''), '');
+    final at = clock.add(const Duration(minutes: 1)).toUtc();
+    Future<void> sql(String q) async {
+      final r = await Process.run('/usr/bin/sqlite3', ['${vm.path}/CloudRecordings.db', q]);
+      expect(r.exitCode, 0, reason: '${r.stderr}');
+    }
+    await sql('create table ZCLOUDRECORDING (Z_PK integer primary key, ZDATE timestamp, ZDURATION float, ZEVICTIONDATE timestamp, '
+        'ZCUSTOMLABEL varchar, ZENCRYPTEDTITLE varchar, ZPATH varchar, ZUNIQUEID varchar, ZAUDIOFUTURE blob);'
+        "insert into ZCLOUDRECORDING (ZDATE, ZDURATION, ZENCRYPTEDTITLE, ZPATH, ZUNIQUEID, ZAUDIOFUTURE) "
+        "values (${coreData(at)}, 62, '金隅凤栖家园 3', null, '0D56F59C-CE3F', X'$hex');"
+        "insert into ZCLOUDRECORDING (ZDATE, ZDURATION, ZENCRYPTEDTITLE, ZPATH, ZUNIQUEID, ZAUDIOFUTURE) "
+        "values (${coreData(at)}, 0, '还在录', null, 'AAAA', null);");
+    clock = clock.add(const Duration(minutes: 5));
+    await s.run();
+    expect(converted, isEmpty); // 声音还没从 iCloud 拉下来
+    final memo = (await VoiceMemos(vm).list()).single; // 没有声音引用的那条不列
+    expect((memo.path, memo.title, memo.present), ('ck:0D56F59C-CE3F', '金隅凤栖家园 3', false));
+    final fbf = await Directory('${vm.path}/.CloudRecordings_SUPPORT/_FBF').create(recursive: true);
+    put(fbf, u);
+    await s.run();
+    expect(converted, [u]);
+    expect(store.recs.keys.where((k) => k.startsWith('iphone')), hasLength(1));
+    expect(store.settings['iphoneTaken'], contains('ck:0D56F59C-CE3F'));
+    // 后来语音备忘录 App 开了：整理成 .m4a、ZPATH 填上、_FBF 那份没了
+    File('${fbf.path}/$u').deleteSync();
+    put(vm, '20261104 040700-0D56F59C.m4a');
+    await sql("update ZCLOUDRECORDING set ZPATH = '20261104 040700-0D56F59C.m4a' where ZUNIQUEID = '0D56F59C-CE3F';");
+    await s.run();
+    expect(converted, [u]); // 不重复收
+    expect((await VoiceMemos(vm).list()).single.rel, '20261104 040700-0D56F59C.m4a');
+  });
+
+  test('隔 10 分钟叫醒一次语音备忘录的后台同步', () async {
+    final s = syncer();
+    woke = 0;
+    await s.run();
+    await s.run();
+    expect(woke, 1);
+    clock = clock.add(const Duration(minutes: 11));
+    await s.run();
+    expect(woke, 2);
+  });
 }

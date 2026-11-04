@@ -18,13 +18,14 @@ const coreDataEpoch = 978307200;
 
 /// 语音备忘录里的一条。
 class Memo {
-  final String path; // 文件夹里的文件名（db 的 ZPATH），认「收没收过」用它
+  final String path; // 认「收没收过」用的编号：ck:<ZUNIQUEID>；db 里没有编号的就是文件名
   final String title;
   final DateTime at; // 开录的那一刻（比起点早晚用）
   final DateTime wall; // 开录时 iPhone 上的墙上时间（文件名里的；没有就按这台电脑的时区算）
   final double seconds; // db 里记的时长（0 = 不知道）
   final bool present; // 文件在这台 Mac 上了（false = 还在 iCloud 上没下来）
-  Memo(this.path, this.title, this.at, this.wall, this.seconds, {this.present = true});
+  final String rel; // 声音文件在文件夹里的相对路径（.m4a 或 _FBF 外部文件，见 [VoiceMemos.list]）
+  Memo(this.path, this.title, this.at, this.wall, this.seconds, {this.present = true, String? rel}) : rel = rel ?? path;
 
   /// 录音名：iphone20250122-175533（时间是 iPhone 上的墙上时间）
   String get stem =>
@@ -61,6 +62,13 @@ class VoiceMemos {
       );
 
   /// 所有录音（db 里有的 + 文件夹里有的），新的在前。文件夹没有 / 读不了抛 [MemoError]。
+  ///
+  /// 声音文件有两种放法：
+  /// - 语音备忘录 App 开过：整理成 `20251114 043830-F73B2BA4.m4a`，db 的 ZPATH 记着文件名；
+  /// - 只有后台同步进程 voicememod 在拉（App 没开）：声音是 Core Data 外部文件 `.CloudRecordings_SUPPORT/_FBF/<UUID>`
+  ///   （没扩展名，内容还是 m4a），ZPATH 是空的，ZAUDIOFUTURE 里记着那个 UUID。
+  /// 同一条录音可能先以第二种、后以第一种出现，所以「收没收过」认 db 里每条固定的 ZUNIQUEID（`ck:` 开头），
+  /// db 里没有 ZUNIQUEID 的（老 db / 读不了）才退回认文件名。
   Future<List<Memo>> list() async {
     final List<FileSystemEntity> items;
     try {
@@ -74,15 +82,25 @@ class VoiceMemos {
       for (final f in items.whereType<File>())
         if (f.path.endsWith('.m4a') && !f.uri.pathSegments.last.startsWith('.')) f.uri.pathSegments.last: f,
     };
-    final meta = await readDb();
     final out = <Memo>[];
-    for (final MapEntry(key: name, value: m) in meta.entries) {
-      final at = m.$2;
-      out.add(Memo(name, m.$1.isEmpty ? _plainTitle(name) : m.$1, at, wallOf(name) ?? at, m.$3,
-          present: files.containsKey(name)));
+    final named = <String>{}; // db 里认领了的 .m4a
+    for (final r in await readDb()) {
+      var rel = '';
+      if (r.path.isNotEmpty) {
+        rel = r.path;
+        named.add(r.path);
+      }
+      if (!files.containsKey(rel) && r.ext.isNotEmpty && await File('${dir.path}/${r.ext}').exists()) rel = r.ext;
+      if (rel.isEmpty) rel = r.ext;
+      if (rel.isEmpty) continue; // 没有声音的引用（还在录 / 坏的）
+      final id = r.uid.isNotEmpty ? 'ck:${r.uid}' : r.path;
+      final wall = r.path.isNotEmpty ? wallOf(r.path) : null;
+      final title = r.title.isNotEmpty ? r.title : (r.path.isNotEmpty ? _plainTitle(r.path) : '录音');
+      out.add(Memo(id, title, r.at, wall ?? r.at, r.seconds,
+          present: rel == r.path ? files.containsKey(rel) : await File('${dir.path}/$rel').exists(), rel: rel));
     }
     for (final MapEntry(key: name, value: f) in files.entries) {
-      if (meta.containsKey(name)) continue;
+      if (named.contains(name)) continue;
       // db 读不了 / 还没记上这条：时间看文件名，认不出就看文件时间
       final wall = wallOf(name);
       final at = wall ?? (await f.stat()).modified;
@@ -93,13 +111,14 @@ class VoiceMemos {
   }
 
   /// 在这台 Mac 上的这条录音（只拿来读）
-  File file(Memo m) => File('${dir.path}/${m.path}');
+  File file(Memo m) => File('${dir.path}/${m.rel}');
 
-  /// db 里的：文件名 → (标题, 开录时刻, 时长秒)。没有 db / 读不了就是空的（退回看文件名）。
+  /// db 里的每一条：ZPATH 文件名（可能空）· _FBF 外部文件相对路径（可能空）· ZUNIQUEID（老 db 没有就空）· 标题 · 开录时刻 · 时长秒。
+  /// 没有 db / 读不了就是空的（退回看文件名）。
   /// 先把 db 连同 -wal / -shm 复制到临时文件夹再读：直接打开原文件，sqlite 也可能往旁边写东西。
-  Future<Map<String, (String, DateTime, double)>> readDb() async {
+  Future<List<({String path, String ext, String uid, String title, DateTime at, double seconds})>> readDb() async {
     final db = File('${dir.path}/CloudRecordings.db');
-    final out = <String, (String, DateTime, double)>{};
+    final out = <({String path, String ext, String uid, String title, DateTime at, double seconds})>[];
     Directory? tmp;
     try {
       if (!await db.exists()) return out;
@@ -108,20 +127,28 @@ class VoiceMemos {
         final f = File('${db.path}$s');
         if (await f.exists()) await f.copy('${tmp.path}/v.db$s');
       }
-      final r = await Process.run(sqlite, [
-        '-json',
-        '${tmp.path}/v.db',
-        'select ZPATH p, coalesce(nullif(ZENCRYPTEDTITLE, \'\'), ZCUSTOMLABEL, \'\') t, ZDATE d, ZDURATION s '
-            'from ZCLOUDRECORDING where ZPATH is not null and ZPATH != \'\' and ZEVICTIONDATE is null',
-      ]);
+      Future<ProcessResult> q(String cols) => Process.run(sqlite, [
+            '-json',
+            '${tmp!.path}/v.db',
+            'select coalesce(ZPATH, \'\') p, coalesce(nullif(ZENCRYPTEDTITLE, \'\'), ZCUSTOMLABEL, \'\') t, ZDATE d, ZDURATION s$cols '
+                'from ZCLOUDRECORDING where ZEVICTIONDATE is null',
+          ]);
+      var r = await q(', coalesce(ZUNIQUEID, \'\') u, hex(ZAUDIOFUTURE) h');
+      if (r.exitCode != 0) r = await q(''); // 老 db 没有这两列
       if (r.exitCode != 0) return out;
       final text = (r.stdout as String).trim();
       if (text.isEmpty) return out;
       for (final x in (jsonDecode(text) as List).whereType<Map>()) {
         final d = (x['d'] as num?)?.toDouble();
         if (d == null) continue;
-        final at = DateTime.fromMillisecondsSinceEpoch(((d + coreDataEpoch) * 1000).round());
-        out['${x['p']}'] = ('${x['t'] ?? ''}'.trim(), at, (x['s'] as num?)?.toDouble() ?? 0);
+        out.add((
+          path: '${x['p'] ?? ''}',
+          ext: externalRef('${x['h'] ?? ''}'),
+          uid: '${x['u'] ?? ''}',
+          title: '${x['t'] ?? ''}'.trim(),
+          at: DateTime.fromMillisecondsSinceEpoch(((d + coreDataEpoch) * 1000).round()),
+          seconds: (x['s'] as num?)?.toDouble() ?? 0,
+        ));
       }
     } catch (_) {
       // db 坏了 / 被锁 / 没有 sqlite3：退回看文件名
@@ -137,6 +164,15 @@ class VoiceMemos {
         ? name.replaceAll(RegExp(r'\.m4a$'), '')
         : '录音 ${w.year}-${_p2(w.month)}-${_p2(w.day)} ${_p2(w.hour)}:${_p2(w.minute)}';
   }
+}
+
+/// Core Data 外部文件引用（hex）→ 相对路径；不是引用（空的 / 内嵌数据）= ''。
+/// 格式：03 23 23 23（"\\x03###"）+ 8 字节大小 + 16 字节 UUID + UUID 字符串。
+String externalRef(String hex) {
+  if (!hex.startsWith('03232323') || hex.length < 56) return '';
+  final b = hex.substring(24, 56);
+  final u = '${b.substring(0, 8)}-${b.substring(8, 12)}-${b.substring(12, 16)}-${b.substring(16, 20)}-${b.substring(20)}';
+  return '.CloudRecordings_SUPPORT/_FBF/$u';
 }
 
 /// 文件里实际有多少秒（系统自带的 afinfo）。读不出（多半是还没下完、文件尾巴没到）= null。
@@ -176,6 +212,15 @@ Future<void> m4aToOgg(File src, File dst) async {
   }
 }
 
+/// 叫醒 Mac 上语音备忘录的后台同步进程 voicememod（launchd 按需起的）。
+/// 2026-11-04 实测：Jane 的 M5 从 2025-01 起就没同步过——语音备忘录 App 不开，这个进程就不起来，iPhone 新录的一直在 iCloud 上。
+/// 它一起来就会从 iCloud 往下拉（不弹窗口、Dock 上也不出图标）。已经在跑的，kickstart 什么都不做。
+Future<void> wakeVoiceMemod() async {
+  if (!Platform.isMacOS || Platform.environment.containsKey('LUYINKA_VOICEMEMOS_DIR')) return;
+  final uid = (await Process.run('/usr/bin/id', ['-u'])).stdout.toString().trim();
+  await Process.run('/bin/launchctl', ['kickstart', 'gui/$uid/com.apple.voicememod']);
+}
+
 typedef MemoConvert = Future<void> Function(File src, File dst);
 typedef MemoProbe = Future<double?> Function(File f);
 
@@ -191,11 +236,17 @@ class VoiceMemoSyncer extends ChangeNotifier {
   final MemoConvert convert;
   final MemoProbe probe;
   final DateTime Function() now;
+  final Future<void> Function() wake;
   VoiceMemoSyncer(this.store, this.memos, this.afterImport,
-      {MemoConvert? convert, MemoProbe? probe, DateTime Function()? now})
+      {MemoConvert? convert, MemoProbe? probe, DateTime Function()? now, Future<void> Function()? wake})
       : convert = convert ?? m4aToOgg,
         probe = probe ?? afinfoSeconds,
-        now = now ?? DateTime.now;
+        now = now ?? DateTime.now,
+        wake = wake ?? wakeVoiceMemod;
+
+  /// 隔这么久叫醒一次 Mac 上语音备忘录的后台同步（voicememod）
+  static const wakeEvery = Duration(minutes: 10);
+  DateTime? _woke;
 
   static const every = Duration(seconds: 30);
 
@@ -252,6 +303,10 @@ class VoiceMemoSyncer extends ChangeNotifier {
     if (busy || off) return;
     busy = true;
     try {
+      if (_woke == null || now().difference(_woke!) >= wakeEvery) {
+        _woke = now();
+        await wake().catchError((_) {});
+      }
       if (since == null) {
         // 第一次打开：从现在算起，以前录的不自动收（几百条要转好几天、会刷满时间线）
         store.settings['iphoneSince'] = now().toIso8601String();
