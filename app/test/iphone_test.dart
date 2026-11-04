@@ -1,3 +1,4 @@
+import 'dart:async';
 // iPhone 语音备忘录：读 db（复制出来读，不碰原文件夹）、起点之后的才自动收、起点之前的勾了才收、
 // 没下完的（空的 / 还在变 / 时长对不上）下轮再看、收过的不再收（重启、iCloud 重新下载都一样）、文件夹没有 / 不让读时说人话。
 // 全用临时的假文件夹，不碰真的语音备忘录。
@@ -222,7 +223,7 @@ void main() {
     await Process.run('chmod', ['000', vm.path]);
     await s.run();
     expect(s.problem?.denied, isTrue);
-    expect(memoStatus(s), contains('隐私与安全性'));
+    expect(memoStatus(s), contains('完全磁盘访问权限'));
   });
 
   testWidgets('挑以前的录音：列出起点之前的（标题、日期、时长），勾了导入', (tester) async {
@@ -364,5 +365,32 @@ void main() {
     clock = clock.add(const Duration(minutes: 11));
     await s.run();
     expect(woke, 2);
+  });
+
+  testWidgets('读不了语音备忘录：第一次主动问一次（去打开 / 以后再说），之后不再问', (t) async {
+    final s = syncer();
+    s.problem = MemoError(true, 'denied');
+    late BuildContext ctx;
+    await t.pumpWidget(MaterialApp(home: Builder(builder: (c) {
+      ctx = c;
+      return const SizedBox();
+    })));
+    await t.runAsync(() async {
+      unawaited(askMemoAccess(ctx, s)); // 先存 settings（真读写）再弹框
+      await Future.delayed(const Duration(milliseconds: 300));
+    });
+    await t.pump();
+    await t.pump(const Duration(milliseconds: 500));
+    expect(find.text('去打开'), findsOneWidget);
+    expect(find.textContaining('完全磁盘访问权限'), findsOneWidget);
+    expect(store.settings['iphoneAsked'], true);
+    await t.tap(find.text('以后再说'));
+    await t.pump();
+    await t.pump(const Duration(milliseconds: 500));
+    await t.pump();
+    expect(find.text('去打开'), findsNothing);
+    await t.runAsync(() => askMemoAccess(ctx, s)); // 问过了：直接返回
+    await t.pump(const Duration(milliseconds: 500));
+    expect(find.text('去打开'), findsNothing);
   });
 }

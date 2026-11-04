@@ -131,6 +131,17 @@ class _HomeState extends State<Home> {
     } else if (sec != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) => showSettings(context, store, widget.syncer, section: sec));
     }
+    // iPhone 语音备忘录读不了（没给完全磁盘访问权限）：第一次发现时主动问一次
+    final memos = VoiceMemoSyncer.instance;
+    if (memos != null) {
+      void ask() {
+        if (memos.problem?.denied == true && mounted) {
+          memos.removeListener(ask);
+          askMemoAccess(context, memos);
+        }
+      }
+      memos.addListener(ask);
+    }
     Updater.instance.blocker = () => widget.live.active ? '正在开现场会议，开完再更新（不然录音会断）' : null;
     Updater.instance.start().then((_) {
         // 远程测试机自检一键更新（点不了鼠标）：LUYINKA_UPDATE_SELFTEST=1 发现新版就直接装
