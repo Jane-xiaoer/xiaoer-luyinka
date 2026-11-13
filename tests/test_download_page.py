@@ -43,3 +43,22 @@ def test_latest_for_app_update(tmp_path, monkeypatch):
 def test_latest_empty(tmp_path, monkeypatch):
     monkeypatch.setattr(app, "DATA", tmp_path)
     assert app.latest() == {"version": "", "notes": ""}
+
+
+def test_page_shows_version_and_notes(tmp_path, monkeypatch):
+    """下载页写版本号、哪天更新的、这次更新了什么（点开看全文）；说明里的尖括号不当网页标签。"""
+    monkeypatch.setattr(app, "DATA", tmp_path)
+    d = tmp_path / "download"
+    d.mkdir()
+    (d / "小耳录音卡-1.3.1.dmg").write_bytes(b"mac")
+    (d / "更新说明.txt").write_text("能暂停了\n· 拉了一半的留着 <b>\n· 卡上的不删\n", encoding="utf-8")
+    page = app.download_page()
+    assert "最新版 1.3.1" in page and "日更新" in page
+    assert "这次更新了什么：能暂停了" in page and "· 卡上的不删" in page
+    assert "&lt;b&gt;" in page
+
+
+def test_page_without_packages_has_no_version(tmp_path, monkeypatch):
+    monkeypatch.setattr(app, "DATA", tmp_path)
+    (tmp_path / "download").mkdir()
+    assert "最新版" not in app.download_page()

@@ -34,6 +34,7 @@ import argparse
 import datetime as dt
 import hashlib
 import hmac
+import html
 import json
 import os
 import queue
@@ -444,6 +445,24 @@ def download_page() -> str:
     def mb(name):
         return f"{(d / name).stat().st_size / 1e6:.0f}MB" if name else ""
 
+    # 版本号 + 哪天更新的 + 这次更新了什么（Jane 11-13：「在这个网页上写个版本号吧」）
+    info = latest()
+    ver = info.get("version", "")
+    newest = next((d / n for n in (mac, apk) if n), None)
+    day = ""
+    if newest:
+        t = dt.datetime.fromtimestamp(newest.stat().st_mtime, dt.timezone(dt.timedelta(hours=8)))  # 北京时间
+        day = f"{t.year} 年 {t.month} 月 {t.day} 日更新"
+    notes = info.get("notes", "")
+    first, _, rest = notes.partition("\n")
+    ver_html = ""
+    if ver:
+        ver_html = f'<div class="ver"><span class="tag">最新版 {html.escape(ver)}</span>{f"<span>{day}</span>" if day else ""}</div>'
+        if notes:
+            ver_html += (f'<details class="notes"><summary>这次更新了什么：{html.escape(first)}</summary>'
+                         f'<div>{html.escape(rest.strip()).replace(chr(10), "<br>")}</div></details>' if rest.strip()
+                         else f'<p class="notes1">这次更新了什么：{html.escape(first)}</p>')
+
     def btn(name, label, sub):
         if not name:
             return f'<div class="b off">{label}<small>还没上传</small></div>'
@@ -470,11 +489,15 @@ text-decoration:none;font-size:14px;font-weight:600;box-shadow:0 4px 14px rgba(3
 box-shadow:0 6px 18px rgba(31,74,68,.12);transition:transform .15s}}
 .card:hover{{transform:translateY(-2px)}} .card b{{font-size:16px}} .card span{{font-size:13px;color:#4f6a64;line-height:1.6}}
 .card i{{font-style:normal;font-size:12px;color:#d95e54;margin-top:auto}}
+.ver{{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:-8px 0 14px;font-size:13px;color:#4f6a64}}
+.ver .tag{{padding:3px 10px;border-radius:999px;background:#1f4a44;color:#f8f3e8;font-weight:600}}
+.notes{{margin:0 0 22px;font-size:13.5px;color:#4f6a64;line-height:1.8}} .notes summary{{cursor:pointer;color:#1f4a44}}
+.notes div{{margin-top:8px;padding:12px 14px;border-radius:12px;background:#efe7d6}} .notes1{{font-size:13.5px;margin:0 0 22px}}
 footer{{max-width:520px;margin:0 auto 40px;text-align:center;font-size:13px;color:#4f6a64;line-height:2}}
 footer a{{color:#1f4a44;font-weight:600;text-decoration:none;border-bottom:1px solid rgba(31,74,68,.3)}}
 @media (max-width:560px){{.gh{{position:absolute;top:14px}} main{{margin-top:62px}} .gh small{{display:none}} .cards{{grid-template-columns:1fr}} .more,footer{{margin-left:16px;margin-right:16px}}}}</style></head><body>
 <a class="gh" href="https://github.com/Jane-xiaoer/xiaoer-luyinka" target="_blank" rel="noopener" aria-label="GitHub 开源仓库"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>GitHub<small>开源</small></a><main>
-<img src="/icon.png" width="96" height="96" alt="" style="display:block;margin:0 0 16px -8px"><h1>小耳录音卡</h1><svg class="wave" width="132" height="12" viewBox="0 0 132 12"><path d="M1 7 Q7 1 13 7 T26 6 Q33 2 39 7 T53 6 Q59 1 66 7 T79 6 Q86 2 92 7 T106 6 Q112 1 119 7 T131 6" fill="none" stroke="#d95e54" stroke-width="2.2" stroke-linecap="round"/></svg><p>录音卡别在身上录一整天，放回手机或电脑旁边，自动拉过来、转成文字、按话题整理好。点一下就能交给你的 AI。</p>
+<img src="/icon.png" width="96" height="96" alt="" style="display:block;margin:0 0 16px -8px"><h1>小耳录音卡</h1><svg class="wave" width="132" height="12" viewBox="0 0 132 12"><path d="M1 7 Q7 1 13 7 T26 6 Q33 2 39 7 T53 6 Q59 1 66 7 T79 6 Q86 2 92 7 T106 6 Q112 1 119 7 T131 6" fill="none" stroke="#d95e54" stroke-width="2.2" stroke-linecap="round"/></svg>{ver_html}<p>录音卡别在身上录一整天，放回手机或电脑旁边，自动拉过来、转成文字、按话题整理好。点一下就能交给你的 AI。</p>
 {btn(mac, "下载 Mac 版", "macOS · 拖进「应用程序」就能用")}
 {btn(apk, "下载安卓版", f"安卓手机 · {mb(apk)} · 下载后点开安装（要允许安装未知来源应用）")}
 {f'<p style="margin:-4px 0 20px;font-size:13px">2017 年以前的老安卓手机装不上？<a href="/download/{quote(old)}" download style="color:#d95e54">下载老手机版（{mb(old)}）</a></p>' if old else ''}
