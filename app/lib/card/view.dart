@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../cards.dart';
 import 'client.dart' show CardInfo;
-import '../home.dart' show cardStatus, pullLine;
+import '../home.dart' show cardStatus, confirmSkip, pullLine;
 import '../rec_sheet.dart';
 import '../store.dart';
 import '../sync.dart';
@@ -51,7 +51,7 @@ class _CardViewState extends State<CardView> {
   bool _onCard(Rec r) => !r.deletedOnCard;
   String _kind(Rec r) => r.stage == 'done'
       ? '已导入'
-      : r.stage == 'card'
+      : r.stage == 'card' || r.stage == 'skipped'
       ? '还在卡上'
       : '处理中';
 
@@ -424,6 +424,7 @@ class _CardViewState extends State<CardView> {
     'transcribed' => (r.error ?? '等着整理', K.todo, null),
     'analyzing' => ('整理中 ${r.progress}%', K.todo, r.progress / 100),
     'done' => (_onCard(r) ? '已导入 · 卡上还留着' : '已导入', K.live, null),
+    'skipped' => ('先不收 · 还在卡上', K.faint, null),
     _ => ('出错了，稍后再试', K.accent, null),
   };
 
@@ -557,6 +558,23 @@ class _CardViewState extends State<CardView> {
                     icon: const Icon(Icons.subject_rounded, size: 16),
                     label: const Text('看看'),
                     style: pill,
+                  ),
+                // 先不收的：重新收；还在收的（卡上来的）：这条先不收（卡上的不动）
+                if (r.stage == 'skipped')
+                  OutlinedButton.icon(
+                    onPressed: () => syncer.unskip(r),
+                    icon: const Icon(Icons.download_rounded, size: 16),
+                    label: const Text('重新收'),
+                    style: pill,
+                  )
+                else if (syncer.fromCard(r) && r.stage != 'done' && r.stage != 'card' && r.stage != 'review')
+                  TextButton.icon(
+                    onPressed: () async {
+                      if (await confirmSkip(context) == true) await syncer.skip(r);
+                    },
+                    icon: const Icon(Icons.close_rounded, size: 16),
+                    label: const Text('先不收'),
+                    style: TextButton.styleFrom(foregroundColor: K.mute),
                   ),
                 if (scenes.isNotEmpty)
                   TextButton.icon(

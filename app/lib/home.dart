@@ -1068,11 +1068,12 @@ class _ProgressBannerState extends State<ProgressBanner> {
   Widget _build(BuildContext context) {
     final pend = widget.store.pending;
     final r = featured(pend);
-    if (r == null) return const SizedBox.shrink();
     final s = widget.syncer;
+    final c = widget.compact;
+    if (s.paused) return _pausedView(c, pend.length); // 暂停着：就算眼下没有在收的也挂着，好点「接着收」
+    if (r == null) return const SizedBox.shrink();
     final a = activity(r, s.track(r),
         connected: s.card.connected, now: DateTime.now(), cloudError: s.card.error, others: pend.length - 1);
-    final c = widget.compact;
     final stalled = a.stall != null;
     final parts = a.stall?.split(' · ') ?? const <String>[];
     final fg = stalled ? K.accent : K.ink;
@@ -1125,10 +1126,84 @@ class _ProgressBannerState extends State<ProgressBanner> {
           padding: EdgeInsets.only(top: 4, left: stalled ? 32 : 0),
           child: Text(a.comfort, style: TextStyle(fontSize: c ? 13 : 13.5, color: K.mute, height: 1.5)),
         ),
+        // 有别的事：暂停全部 / 这条先不收（卡上的录音不动）
+        Padding(
+          padding: EdgeInsets.only(top: 8, left: stalled ? 32 : 0),
+          child: Wrap(spacing: 8, runSpacing: 6, children: [
+            OutlinedButton.icon(
+              onPressed: s.pause,
+              icon: const Icon(Icons.pause_rounded, size: 16),
+              label: const Text('暂停'),
+              style: _bannerBtn,
+            ),
+            if (s.fromCard(r))
+              OutlinedButton.icon(
+                onPressed: () => _skip(context, r),
+                icon: const Icon(Icons.close_rounded, size: 16),
+                label: const Text('这条先不收'),
+                style: _bannerBtn,
+              ),
+          ]),
+        ),
       ]),
     );
   }
+
+  ButtonStyle get _bannerBtn => OutlinedButton.styleFrom(
+        foregroundColor: K.ink,
+        side: BorderSide(color: const Color(0xFFBFD2B6)),
+        visualDensity: VisualDensity.compact,
+        textStyle: const TextStyle(fontSize: 13),
+      );
+
+  Future<void> _skip(BuildContext context, Rec r) async {
+    final ok = await confirmSkip(context);
+    if (ok == true) await widget.syncer.skip(r);
+  }
+
+  /// 暂停着：说清卡上的都还在，点「接着收」继续
+  Widget _pausedView(bool c, int n) => Container(
+        padding: EdgeInsets.fromLTRB(c ? 14 : 18, c ? 12 : 14, c ? 14 : 18, c ? 12 : 14),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF1EEE4),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: K.lineStrong, width: 1.2),
+        ),
+        child: Row(children: [
+          Icon(Icons.pause_circle_outline_rounded, size: c ? 22 : 26, color: K.mute),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+              Text('已暂停${n > 0 ? ' · $n 条等着收' : ''}',
+                  style: TextStyle(fontSize: c ? 16 : 18, fontWeight: FontWeight.w700, color: K.ink)),
+              const SizedBox(height: 2),
+              Text('卡上的录音都还在。拉了一半的，点「接着收」从断的地方继续。',
+                  style: TextStyle(fontSize: 13, color: K.mute, height: 1.45)),
+            ]),
+          ),
+          const SizedBox(width: 10),
+          FilledButton.icon(
+            onPressed: widget.syncer.resume,
+            icon: const Icon(Icons.play_arrow_rounded, size: 18),
+            label: const Text('接着收'),
+            style: FilledButton.styleFrom(backgroundColor: K.live),
+          ),
+        ]),
+      );
 }
+
+/// 「这条先不收」先问一句：说清卡上的不动、以后能再收。
+Future<bool?> confirmSkip(BuildContext context) => showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('这条先不收？'),
+        content: const Text('电脑上已经拉下来、转出来的这条会清掉；卡上的录音不动，还在卡里。\n以后想要了，到「录音卡」页点这条的「重新收」。'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('接着收')),
+          FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('先不收')),
+        ],
+      ),
+    );
 
 /// ① 从卡上拉 → ② 云端转写 → ③ 整理：做完的打勾，当前这步高亮。
 class StepBar extends StatelessWidget {
@@ -1400,6 +1475,7 @@ class Sidebar extends StatelessWidget {
 
   /// 录音卡那一行右边的短状态：选卡 / 电量 / 不在旁边
   String _cardLine() {
+    if (syncer.paused) return '已暂停';
     if (syncer.boundId == null) return syncer.card.choices.length > 1 ? '选卡' : '没连过';
     if (store.pending.any((r) => r.stage == 'pulling' && sourceOf(r.stem) == '录音卡')) return '拉取中';
     final b = syncer.card.info?.battery ?? (store.settings['cardInfo'] is List ? (store.settings['cardInfo'] as List)[0] as int? : null);

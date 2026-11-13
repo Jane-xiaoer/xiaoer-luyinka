@@ -11,6 +11,9 @@ abstract class Link {
   Future<void> close();
 }
 
+/// 用户点了「暂停」/「先不收这条」：正在拉的停下（拉了一半的留着，下次接着拉）
+class CardStopped implements Exception {}
+
 class CardError implements Exception {
   final String message;
   CardError(this.message);
@@ -101,7 +104,7 @@ class CardClient {
   }
 
   /// 拉到 part 文件（追加写），断了从 part 现有长度续。
-  Future<void> download(RemoteFile f, File part, {void Function(int got, int total)? progress}) async {
+  Future<void> download(RemoteFile f, File part, {void Function(int got, int total)? progress, bool Function()? stop}) async {
     var got = await part.exists() ? await part.length() : 0;
     if (f.size > 0 && got >= f.size) return;
     await send(cmdRequestFile(f.name, got));
@@ -119,6 +122,7 @@ class CardClient {
           out.add(p.body);
           got += p.body.length;
           progress?.call(got, f.size);
+          if (stop?.call() == true) throw CardStopped();
           continue;
         }
         final st = parseFileEnd(p);

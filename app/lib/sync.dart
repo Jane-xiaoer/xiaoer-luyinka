@@ -153,9 +153,70 @@ class Syncer {
 
   bool get deleteAfter => store.settings['deleteAfter'] == true;
 
+  // ───────── 暂停 / 先不收（Jane 11-13：「上传过程中增加一个暂停或者终止的按钮…录音的内容还是回到卡里，不要删除」） ─────────
+  // 暂停：不拉卡、不上传、不转写、不整理，正在拉的那条停下（拉了一半的留着，接着收时从断的地方续）；存在设置里，重开 App 也还暂停着。
+  // 先不收这条：这条不收了，本机拉下来的、转出来的都清掉，卡上的录音不动（卡上只删「已导入」的，它永远到不了那一步）；
+  //   以后在录音卡页点「重新收」就从头再收。
+
+  bool get paused => store.settings['paused'] == true;
+  String? _stopStem; // 正在拉的这条被点了「先不收」
+
+  void pause() {
+    store.settings['paused'] = true;
+    _changed();
+  }
+
+  Future<void> resume() async {
+    store.settings.remove('paused');
+    _changed();
+    await run();
+  }
+
+  /// 先不收这条：清掉本机的，卡上的不动。
+  Future<void> skip(Rec r) async {
+    _stopStem = r.stem;
+    final job = r.job ?? r.stream;
+    r
+      ..stage = 'skipped'
+      ..job = null
+      ..stream = null
+      ..sent = 0
+      ..got = 0
+      ..progress = 0
+      ..error = null;
+    tracks.remove(r.stem);
+    _changed();
+    if (job != null) await cloud.delete(job).catchError((_) {});
+    for (final f in [store.raw(r.stem, part: true), store.raw(r.stem), store.audio(r.stem), store.lib.transcript(r.stem)]) {
+      try {
+        if (await f.exists()) await f.delete();
+      } catch (_) {}
+    }
+    if (store.peekResult(r.stem) != null) await store.dropRecording(r.stem);
+    store.recs[r.stem] = r; // dropRecording 会把它从 recs 拿掉：留着，才记得「先不收」、不再拉
+    _changed();
+  }
+
+  /// 重新收：从头再拉。
+  Future<void> unskip(Rec r) async {
+    r
+      ..stage = 'card'
+      ..got = 0
+      ..error = null;
+    if (_stopStem == r.stem) _stopStem = null;
+    _changed();
+    if (!paused) await run();
+  }
+
+  bool _gone(Rec r) => r.stage == 'skipped';
+
+  /// 这条是从录音卡上拉的（卡上的文件名是 note…，界面上有时标成「小耳语音」，别按 sourceOf 判）：
+  /// 只有这种能「先不收」——卡上留着原件。现场会议、iPhone、录音豆、随手记的没有卡上那份，不给。
+  bool fromCard(Rec r) => !r.deletedOnCard && !RegExp(r'^(iphone|bean|live|memo|voice)').hasMatch(r.stem);
+
   /// 一轮：拉卡 → 传云 → 收结果。重复调用安全（正在跑就跳过）。
   Future<void> run({bool fromCard = true}) async {
-    if (_busy) return;
+    if (_busy || paused) return;
     _busy = true;
     try {
       // 不用云端，先收：云端登记不上也不耽误外面放进来的。它出错不能拖垮拉卡（每条的错它自己报）
@@ -240,11 +301,14 @@ class Syncer {
       final files = await c.listFiles();
       for (final f in files) {
         final r = store.recs.putIfAbsent(f.stem, () => Rec(f.stem, f.size, 'card'));
+        if (paused) break;
         if (r.stage == 'card' || r.stage == 'pulling') await _download(c, f, r);
         if (r.stage == 'done' && deleteAfter && !r.deletedOnCard) {
           r.deletedOnCard = await c.delete(f.name) != false;
         }
       }
+    } on CardStopped {
+      // 点了暂停 / 先不收：断开就是了，不算出错（卡还在往外发那条，断开它就停）
     } on CardError catch (e) {
       card.error = e.message;
     } on TimeoutException {
@@ -267,7 +331,7 @@ class Syncer {
     var last = t0;
     _kick(r, part); // 上一轮（或 App 重启前）已经拉下来的，先把满的段传了
     try {
-      await c.download(f, part, progress: (got, total) {
+      await c.download(f, part, stop: () => paused || _stopStem == r.stem || _gone(r), progress: (got, total) {
         r.got = got;
         final now = DateTime.now();
         final secs = now.difference(t0).inMilliseconds / 1000;
@@ -282,6 +346,7 @@ class Syncer {
       await _pumping; // 正在传的那段等它传完，别跟下一轮抢
       r.bps = 0;
     }
+    if (_gone(r)) return;
     await part.rename(store.raw(f.stem).path);
     r
       ..stage = 'pulled'
@@ -320,7 +385,7 @@ class Syncer {
       try {
         while (true) {
           final next = partsToSend(have, r.sent, partBytes, last: last).firstOrNull;
-          if (next == null) break;
+          if (next == null || paused || _gone(r)) break;
           await raf.setPosition(next.$1);
           final bytes = await raf.read(next.$2 - next.$1);
           // 云端回它实际有几段：重传了已有的、或跳了号，都按它说的接着来
@@ -330,7 +395,7 @@ class Syncer {
       } finally {
         await raf.close();
       }
-      if (!last) return;
+      if (!last || paused || _gone(r)) return; // 暂停 / 先不收：没传完的别叫云端收尾
       try {
         await cloud.finish(id, r.sent);
       } on CloudError catch (e) {
@@ -355,6 +420,7 @@ class Syncer {
 
   Future<void> _upload() async {
     for (final r in store.recs.values.where((r) => r.stage == 'pulled' || (r.stage == 'error' && r.job == null)).toList()) {
+      if (paused) return;
       final f = store.raw(r.stem);
       if (!await f.exists()) continue;
       if (local?.ready == true && r.job == null) {
@@ -373,12 +439,23 @@ class Syncer {
       _changed();
       try {
         await _stream(r, f, last: true);
+        if (paused || _gone(r)) {
+          if (!_gone(r)) r.stage = 'pulled'; // 暂停：回到「拉好了」，接着收时再传
+          _changed();
+          continue;
+        }
         r.job ??= await cloud.upload('${r.stem}.', await f.readAsBytes(), timezone());
+        if (_gone(r)) {
+          await cloud.delete(r.job!).catchError((_) {});
+          r.job = null;
+          continue;
+        }
         r
           ..stage = 'processing'
           ..progress = 0
           ..error = null;
       } catch (e) {
+        if (_gone(r)) continue;
         r
           ..stage = 'pulled'
           ..error = '上传没成功，稍后自动再试：$e';
@@ -389,15 +466,17 @@ class Syncer {
 
   Future<void> _collect() async {
     for (final r in store.recs.values.where((r) => r.stage == 'processing' && r.job != null).toList()) {
-      final j = await cloud.job(r.job!);
+      final id = r.job!; // 等云端回话时可能被点了「先不收」（job 清空）
+      final j = await cloud.job(id);
+      if (_gone(r)) continue;
       r.progress = (j['progress'] as num?)?.toInt() ?? r.progress;
       if (j['status'] == 'done') {
         final res = Map<String, dynamic>.from(j['result']);
         try {
-          await store.audio(r.stem).writeAsBytes(await cloud.audio(r.job!));
+          await store.audio(r.stem).writeAsBytes(await cloud.audio(id));
         } catch (_) {}
         await _done(r, res);
-        await cloud.delete(r.job!).catchError((_) {}); // 取走了，云端删掉
+        await cloud.delete(id).catchError((_) {}); // 取走了，云端删掉
         r.job = null;
       } else if (j['status'] == 'error') {
         r
@@ -427,6 +506,7 @@ class Syncer {
 
   /// 转写好了（本机或云端）：存逐字稿和索引、删原文件，排进下一步（录音豆的先等用户看）。播放用的 m4a 调用前已经放好。
   Future<void> _done(Rec r, Map<String, dynamic> res) async {
+    if (_gone(r)) return; // 转写回来前点了「先不收」
     final lines = [for (final x in (res['lines'] as List? ?? const [])) List<String>.from(x)];
     final memo = memoTitle(store, r.stem);
     if (memo != null) res['memo'] = memo;
@@ -506,6 +586,7 @@ class Syncer {
           r.progress = t == 0 ? 0 : d * 100 ~/ t;
           _ping();
         });
+        if (_gone(r)) continue;
         carryDone(before, res['scenes']);
         await store.syncNoteTodos(res); // 现场会议 / 随手记笔记里的 ☐：代码变成待办（笔记的勾为准）
         await store.putResult(r.stem, res);

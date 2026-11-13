@@ -498,7 +498,7 @@ class Store extends ChangeNotifier {
   }
 
   /// 正在路上的（还没出结果的）。
-  List<Rec> get pending => recs.values.where((r) => r.stage != 'done' && r.stage != 'review').toList(); // 待你决定的不算在处理
+  List<Rec> get pending => recs.values.where((r) => r.stage != 'done' && r.stage != 'review' && r.stage != 'skipped').toList(); // 待你决定的不算在处理
 
   /// 类别 → 这一类的场景（新的在前），按 cats 的顺序，没有的类别不出现。
   Map<String, List<Scene>> get byCategory {
