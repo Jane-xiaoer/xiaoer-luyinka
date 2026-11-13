@@ -62,3 +62,23 @@ def test_page_without_packages_has_no_version(tmp_path, monkeypatch):
     monkeypatch.setattr(app, "DATA", tmp_path)
     (tmp_path / "download").mkdir()
     assert "最新版" not in app.download_page()
+
+
+def test_standard_names_and_checksums(tmp_path, monkeypatch):
+    """按版本号的英文名：XiaoerLuyinka-<版本>-macos-universal.dmg / -android-arm64.apk / -android-armv7.apk；
+    页上有安全校验（签名、证书指纹、每个包的 SHA-256、SHA256SUMS.txt）。"""
+    import hashlib
+    monkeypatch.setattr(app, "DATA", tmp_path)
+    d = tmp_path / "download"
+    d.mkdir()
+    (d / "XiaoerLuyinka-1.3.2-macos-universal.dmg").write_bytes(b"mac")
+    (d / "XiaoerLuyinka-1.3.2-android-arm64.apk").write_bytes(b"a64")
+    (d / "XiaoerLuyinka-1.3.2-android-armv7.apk").write_bytes(b"v7")
+    (d / "SHA256SUMS.txt").write_text("x", encoding="utf-8")
+    j = app.latest()
+    assert j["version"] == "1.3.2"
+    assert j["android"]["url"].endswith("android-arm64.apk") and j["android_old"]["url"].endswith("android-armv7.apk")
+    page = app.download_page()
+    assert "下载老手机版" in page and "android-armv7.apk" in page
+    assert "安全校验" in page and app.ANDROID_CERT_SHA256 in page and app.MAC_TEAM in page
+    assert hashlib.sha256(b"a64").hexdigest() in page and "SHA256SUMS.txt" in page

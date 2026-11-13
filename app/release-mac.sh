@@ -1,6 +1,6 @@
 #!/bin/bash
 # Mac 版发布：编译 → 改成「小耳录音卡.app」→ Developer ID 签名 → DMG → Apple 公证 → 钉票。
-# 产物：dist/小耳录音卡-<版本>.dmg（别人下载双击、拖进「应用程序」就能用，不弹「无法验证开发者」）。
+# 产物：dist/XiaoerLuyinka-<版本>-macos-universal.dmg（别人下载双击、拖进「应用程序」就能用，不弹「无法验证开发者」）。
 # 签名跟 Omia 共用：证书 Developer ID Application: Juan Li（有两张同名，用 Omia 验证过的 G2，指纹 DBF88C5E…），
 # 公证凭据在钥匙串 profile「omia-notary」。没有这个 profile 就只签名不公证（别人第一次打开要去「隐私与安全性」点仍要打开）。
 set -euo pipefail
@@ -9,7 +9,7 @@ CLOUD=${LUYINKA_CLOUD:-https://luyinka.xiaoeromia.com:8443}
 VER=$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d+ -f1)
 APP=build/macos/Build/Products/Release/XiaoerLuyinka.app
 OUT=dist/小耳录音卡.app
-DMG=dist/小耳录音卡-$VER.dmg
+DMG=dist/XiaoerLuyinka-$VER-macos-universal.dmg # 按版本号的英文名（11-13 Jane）；DMG 里的 App 还叫「小耳录音卡」
 ID=${LUYINKA_SIGN_ID:-DBF88C5EF3B2A16F46817CD7C6938E880928D9D8}
 NOTARY=${LUYINKA_NOTARY_PROFILE:-omia-notary}
 

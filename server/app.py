@@ -434,13 +434,26 @@ def ask(question: str, scenes_ctx: list) -> str:
 
 # ───────── 下载页 ─────────
 
+# 安装包命名（11-13 Jane：「文件名要按照软件工程的规则…按照版本号来命名」）：
+#   XiaoerLuyinka-<版本>-macos-universal.dmg / XiaoerLuyinka-<版本>-android-arm64.apk / XiaoerLuyinka-<版本>-android-armv7.apk
+#   旁边放 SHA256SUMS.txt（shasum -a 256 的格式）。老包是中文名「小耳录音卡-<版本>-安卓老手机.apk」，两种都认。
+# 防篡改：Mac 包 Developer ID 签名 + 苹果公证（团队 3DP32PZ62M），App 自动更新时核对；安卓包用正式钥匙签名，证书指纹写在页上；
+#   每个包的 SHA-256 写在页上，App 自动更新下载完也核对。
+MAC_TEAM = "3DP32PZ62M"
+ANDROID_CERT_SHA256 = "d2bf5f72e14746e6ce88b3ac821c7a3570d315b83312bcea57e24c033435dbad"
+
+
+def _old_phone(name: str) -> bool:
+    return "armv7" in name or "老手机" in name
+
+
 def download_page() -> str:
     d = DATA / "download"
     files = sorted(d.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True) if d.exists() else []
     mac = next((p.name for p in files if p.suffix == ".dmg"), None)
     # 安卓分两个包（一台手机只用得上一种芯片的，全塞一个包要 140MB）：主流手机（arm64）+ 2017 年以前的老手机（armv7，文件名带「老手机」）
-    apk = next((p.name for p in files if p.suffix == ".apk" and "老手机" not in p.name), None)
-    old = next((p.name for p in files if p.suffix == ".apk" and "老手机" in p.name), None)
+    apk = next((p.name for p in files if p.suffix == ".apk" and not _old_phone(p.name)), None)
+    old = next((p.name for p in files if p.suffix == ".apk" and _old_phone(p.name)), None)
 
     def mb(name):
         return f"{(d / name).stat().st_size / 1e6:.0f}MB" if name else ""
@@ -489,6 +502,9 @@ text-decoration:none;font-size:14px;font-weight:600;box-shadow:0 4px 14px rgba(3
 box-shadow:0 6px 18px rgba(31,74,68,.12);transition:transform .15s}}
 .card:hover{{transform:translateY(-2px)}} .card b{{font-size:16px}} .card span{{font-size:13px;color:#4f6a64;line-height:1.6}}
 .card i{{font-style:normal;font-size:12px;color:#d95e54;margin-top:auto}}
+.sec{{margin-top:22px;font-size:13px;color:#4f6a64;line-height:1.75}} .sec summary{{cursor:pointer;color:#1f4a44;font-weight:600}}
+.sec code{{font-family:ui-monospace,Menlo,monospace;font-size:11.5px;word-break:break-all;background:#efe7d6;padding:1px 5px;border-radius:5px}}
+.sec ul{{padding-left:18px;margin:8px 0}} .sec a{{color:#d95e54}}
 .ver{{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:-8px 0 14px;font-size:13px;color:#4f6a64}}
 .ver .tag{{padding:3px 10px;border-radius:999px;background:#1f4a44;color:#f8f3e8;font-weight:600}}
 .notes{{margin:0 0 22px;font-size:13.5px;color:#4f6a64;line-height:1.8}} .notes summary{{cursor:pointer;color:#1f4a44}}
@@ -502,6 +518,7 @@ footer a{{color:#1f4a44;font-weight:600;text-decoration:none;border-bottom:1px s
 {btn(apk, "下载安卓版", f"安卓手机 · {mb(apk)} · 下载后点开安装（要允许安装未知来源应用）")}
 {f'<p style="margin:-4px 0 20px;font-size:13px">2017 年以前的老安卓手机装不上？<a href="/download/{quote(old)}" download style="color:#d95e54">下载老手机版（{mb(old)}）</a></p>' if old else ''}
 <ol><li>录音卡开机，放在旁边。</li><li>打开 App，第一次点「允许」使用蓝牙。</li><li>录音会自动出现，一天一页。</li></ol>
+{_verify_html(d, [n for n in (mac, apk, old) if n])}
 </main>
 <section class="more"><h2>小耳的其他作品</h2><div class="cards">
 <a class="card" href="https://xiaoeromia.com" target="_blank" rel="noopener"><b>小耳 Omia</b><span>Mac / Windows 上一个窗口打开 150+ 种文件：DWG、PSD、PDF、Office……</span><i>去看看 →</i></a>
@@ -511,6 +528,20 @@ footer a{{color:#1f4a44;font-weight:600;text-decoration:none;border-bottom:1px s
 <footer>小耳录音卡是开源的（GPL-3.0），代码在 <a href="https://github.com/Jane-xiaoer/xiaoer-luyinka" target="_blank" rel="noopener">GitHub</a><br>
 关注小耳：<a href="https://x.com/xiaoerzhan" target="_blank" rel="noopener">X / 推特 @xiaoerzhan</a></footer>
 </body></html>"""
+
+
+def _verify_html(d: Path, names: list[str]) -> str:
+    """「安全校验」：签名是谁、每个包的 SHA-256，教人怎么核对（防有人改了包植入木马）。"""
+    if not names:
+        return ""
+    rows = "".join(f"<li>{html.escape(n)}<br><code>{_sha256(d / n)}</code></li>" for n in names)
+    sums = f'<a href="/download/SHA256SUMS.txt" download>SHA256SUMS.txt</a>' if (d / "SHA256SUMS.txt").is_file() else ""
+    return f"""<details class="sec"><summary>🔒 安全校验（确认下到的是小耳发的原版）</summary>
+<p style="margin:8px 0">只从这个网站或 <a href="https://github.com/Jane-xiaoer/xiaoer-luyinka/releases" target="_blank" rel="noopener">GitHub 发布页</a> 下载。
+Mac 版有苹果开发者签名（团队 {MAC_TEAM}）并经苹果公证，被改过系统会拦下；安卓版用小耳的正式证书签名，证书指纹 <code>{ANDROID_CERT_SHA256}</code>。
+App 里自动更新时会自己核对下面的指纹和签名，对不上就不装。</p>
+<p style="margin:8px 0">每个安装包的 SHA-256（Mac 上在「终端」里打 <code>shasum -a 256 文件名</code> 对一下）{("，全部列表：" + sums) if sums else ""}：</p>
+<ul>{rows}</ul></details>"""
 
 
 _SHA: dict[tuple[str, float], str] = {}
@@ -533,8 +564,8 @@ def latest() -> dict:
     files = sorted((p for p in d.iterdir() if p.is_file()), key=lambda p: p.stat().st_mtime, reverse=True) if d.exists() else []
     pick = {
         "mac": next((p for p in files if p.suffix == ".dmg"), None),
-        "android": next((p for p in files if p.suffix == ".apk" and "老手机" not in p.name), None),
-        "android_old": next((p for p in files if p.suffix == ".apk" and "老手机" in p.name), None),
+        "android": next((p for p in files if p.suffix == ".apk" and not _old_phone(p.name)), None),
+        "android_old": next((p for p in files if p.suffix == ".apk" and _old_phone(p.name)), None),
     }
     out: dict = {}
     for k, p in pick.items():
