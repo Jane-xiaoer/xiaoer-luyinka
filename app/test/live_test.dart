@@ -69,11 +69,50 @@ void main() {
     expect((res['scenes'] as List).single['title'], '渠道方案');
   });
 
-  test('没识别出字：不收，停在暂停', () async {
-    final live = meeting()..lines.clear();
+  test('没识别出字也没记笔记：不收，停在暂停', () async {
+    final live = meeting()
+      ..lines.clear()
+      ..notes = '  ';
     expect(await live.finish(), isNull);
     expect(live.state, LiveState.paused);
     expect(store.recs, isEmpty);
+  });
+
+  test('没识别出字、只有笔记：收成一段开会，笔记待办马上进（11-13 芯：别逼她点放弃丢笔记）', () async {
+    final live = meeting()..lines.clear();
+    live.notes = '';
+    live.setNotes('青禾脚本会\n☐ 周五前改完旁白\n☑ 发上一版');
+    final stem = await live.finish();
+    expect(stem, 'live20261024-150000');
+    expect(live.lastNotesOnly, isTrue);
+    expect(live.noteSummary, contains('2 条已进「待办」'));
+    expect(store.recs[stem], isNull); // 不排进整理
+    final s = store.scenes.single;
+    expect(s.category, '开会');
+    expect(s.title, '渠道会');
+    expect([for (final a in s.actions) '${a['text']}|${a['done'] == true}|${a['confirmed'] == true}'],
+        ['周五前改完旁白|false|true', '发上一版|true|true']);
+    expect(File('${store.lib.liveDir.path}/2026-10-24 1500 渠道会.md').readAsStringSync(), contains('- [ ] 周五前改完旁白'));
+  });
+
+  test('笔记待办：我打的进待办、挪来的进待确认、名单上的「名字：」归他、整理后还在、模型拆的重复并掉', () async {
+    await store.lib.peopleFile.writeAsString('# 人员名单\n\n- 林夏（林下）｜同事｜||\n');
+    final live = meeting(chat: null);
+    live.notes = '';
+    live.setNotes('☐ 周五前改完旁白\n☐ 林下：要素材包\n☐ 预算：50万');
+    live.setNotes('${live.notes}\n\n☐ 先从华东开始铺', src: 'clip', at: 3);
+    final stem = await live.finish();
+    expect(live.noteSummary, contains('3 条整理完进「待办」'));
+    expect(live.noteSummary, contains('1 条'));
+    await syncer.run(fromCard: false);
+    expect(store.recs[stem]!.stage, 'done');
+    final acts = store.scenes.single.pairs('actions').where((a) => a['from'] == 'note').toList();
+    expect([for (final a in acts) '${a['text']}|${a['who']}|${a['confirmed'] == true}'], [
+      '周五前改完旁白|我|true',
+      '要素材包|林夏|true',
+      '预算：50万|我|true',
+      '先从华东开始铺|我|false',
+    ]);
   });
 
   test('顺一下：要求来自模板，原话当背景，笔记是主体', () async {
@@ -188,5 +227,30 @@ void main() {
     expect(c.voices.autoCount('我'), 1); // 再开一次不重复学
     expect(c.voices.autoCount('练'), 1);
     c.dispose();
+  });
+
+  test('整理看我的笔记：切段那步当参考（按时间给），写纪要那步当主线；带上的旧待办不喂', () async {
+    final users = <String>[];
+    final sy = Syncer(store, Cloud('http://127.0.0.1:9', token: 't'), (_) async => null, () async => [], () => 'Asia/Shanghai',
+        chat: (system, user) async {
+          users.add(user);
+          return system.contains('"scenes"')
+              ? jsonEncode({'scenes': [{'start': '15:00:00', 'end': '15:01:00', 'category': '开会', 'title': '渠道方案', 'event': '讨论渠道。'}]})
+              : '## 纪要\n- 渠道';
+        });
+    final live = meeting();
+    live.notes = '';
+    live.setNotes('我倾向==华南==', at: 5);
+    live.setNotes('${live.notes}\n## 上次没做完\n☐ 旧事', src: 'carry');
+    final stem = await live.finish();
+    await sy.run(fromCard: false);
+    expect(store.recs[stem]!.stage, 'done');
+    final cut = users.firstWhere((u) => u.contains('第0句'));
+    expect(cut, contains('我开会时在这一截记的笔记，只当参考'));
+    expect(cut, contains('我倾向华南'));
+    expect(cut, isNot(contains('旧事')));
+    final note = users.firstWhere((u) => u.contains('## 这一段'));
+    expect(note, contains('## 我当时记的笔记（这一段的）\n我倾向华南'));
+    expect(note, isNot(contains('旧事')));
   });
 }

@@ -57,7 +57,7 @@ class _CardViewState extends State<CardView> {
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-    listenable: store,
+    listenable: Listenable.merge([store, syncer.tick]),
     builder: (context, _) {
       final pad = MediaQuery.sizeOf(context).width >= 900 ? 26.0 : 14.0;
       final wide = MediaQuery.sizeOf(context).width >= 1100;

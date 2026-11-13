@@ -46,9 +46,13 @@ class Library {
   File get quickActionsFile => File('$path/模板/一键按钮.md');
   File get styleFile => File('$path/模板/我的写作风格.md');
   File get vocabFile => File('$path/词汇表.md');
+  File get peopleFile => File('$path/人员名单.md');
+  File get fixesFile => File('$path/.xiaoer/纠正.jsonl');
+  File get hiddenPeopleFile => File('$path/.xiaoer/按人不看.txt'); // 左栏「按人」里删掉的人，一行一个（名单上的存整行，找回时放回去）
   File get _oldVocab => File('$path/模板/常用词.md'); // 以前放在这、叫「常用词」
   File get polishFile => File('$path/模板/会议笔记·顺一下.md');
   Directory get liveDir => Directory('$path/现场会议');
+  Directory get memoDir => Directory('$path/随手记');
 
   Future<void> ensure() async {
     for (final d in ['.xiaoer', '录音', '逐字稿', '每日', '每周', '模板', '成稿']) {
@@ -152,6 +156,84 @@ class Library {
     }
   }
 
+  /// 人员名单（人员名单.md，去掉说明行；没写就是空）。拆事时认人、判归谁用。
+  String people() {
+    try {
+      return peopleFile.existsSync() ? cleanVocab(peopleFile.readAsStringSync()) : '';
+    } catch (_) {
+      return '';
+    }
+  }
+
+  /// 我亲手纠正过的拆事，最近 [max] 条，一条一行（喂给拆事当例子）。没有 / 读不了就是空。
+  String fixes({int max = 30}) {
+    try {
+      if (!fixesFile.existsSync()) return '';
+      final lines = <String>[];
+      for (final l in fixesFile.readAsLinesSync()) {
+        if (l.trim().isEmpty) continue;
+        try {
+          final s = fixLine(Map<String, dynamic>.from(jsonDecode(l) as Map));
+          if (s.isNotEmpty) lines.add(s);
+        } catch (_) {}
+      }
+      return lines.skip(lines.length > max ? lines.length - max : 0).join('\n');
+    } catch (_) {
+      return '';
+    }
+  }
+
+  /// 名单上的人（App「人员名单」页编辑）。
+  List<PersonEntry> peopleEntries() {
+    try {
+      return peopleFile.existsSync() ? parsePeople(peopleFile.readAsStringSync()).$1 : [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /// 左栏「按人」里删掉（藏起来）的人。
+  List<HiddenPerson> hiddenPeople() {
+    try {
+      return hiddenPeopleFile.existsSync()
+          ? [for (final l in hiddenPeopleFile.readAsLinesSync()) ?HiddenPerson.parse(l)]
+          : [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<void> saveHiddenPeople(List<HiddenPerson> people) async {
+    await hiddenPeopleFile.parent.create(recursive: true);
+    await hiddenPeopleFile.writeAsString(people.isEmpty ? '' : '${people.map((h) => h.line).join('\n')}\n');
+  }
+
+  /// 存名单：只换掉「- 名字…」那些行，标题和说明原样留着。
+  Future<void> savePeople(List<PersonEntry> people) async {
+    final extra = await peopleFile.exists() ? parsePeople(await peopleFile.readAsString()).$2 : <String>[];
+    await peopleFile.writeAsString(peopleMd(people, extra));
+  }
+
+  /// 记一条我的纠正（追加一行到 .xiaoer/纠正.jsonl）：下次重新整理这条录音时记住，也当拆事的例子。
+  Future<void> addFix(Map<String, dynamic> fix) async {
+    await fixesFile.parent.create(recursive: true);
+    await fixesFile.writeAsString('${jsonEncode(fix)}\n', mode: FileMode.append, flush: true);
+  }
+
+  /// 某条录音的纠正记录（原样的 Map，按写入先后）。重新整理时「记住」我的选择用。
+  List<Map<String, dynamic>> fixesFor(String stem) {
+    try {
+      if (!fixesFile.existsSync()) return [];
+      return [
+        for (final l in fixesFile.readAsLinesSync())
+          if (l.trim().isNotEmpty)
+            if (_jsonMap(l) case final m? when m['rec'] == stem) m,
+      ];
+    } catch (_) {
+      return [];
+    }
+  }
+
   /// 词汇表（词汇表.md）里的词：现场会议出字、录音转写时替换，「词汇表」窗口里编辑。
   List<VocabEntry> vocabEntries() {
     try {
@@ -181,6 +263,7 @@ class Library {
   Future<void> writeLiveNotes(String stem, String title, DateTime start, String notes) async {
     await liveDir.create(recursive: true);
     final f = File('${liveDir.path}/${_day(start)} ${_hm(start, '')} ${safe(title)}.md');
+    await _dropRenamed(liveDir, '${_day(start)} ${_hm(start, '')} ', f, stem);
     await f.writeAsString([
       '# $title',
       '',
@@ -192,6 +275,26 @@ class Library {
       '',
     ].join('\n'));
   }
+  /// 随手记：随手记/<日期 时分> <标题>.md（没有录音）。
+  Future<void> writeMemo(String stem, String title, DateTime start, String notes) async {
+    await memoDir.create(recursive: true);
+    final f = File('${memoDir.path}/${_day(start)} ${_hm(start, '')} ${safe(title.isEmpty ? '随手记' : title)}.md');
+    await _dropRenamed(memoDir, '${_day(start)} ${_hm(start, '')} ', f, stem);
+    await f.writeAsString([
+      '# ${title.isEmpty ? '随手记' : title}',
+      '',
+      '时间：${_day(start)} ${_hm(start)}　·　来源：随手记　·　<!-- $stem -->',
+      '',
+      notes,
+      '',
+    ].join('\n'));
+  }
+
+  Future<void> deleteMemoFile(String stem, DateTime start) async {
+    if (!await memoDir.exists()) return;
+    await _dropRenamed(memoDir, '${_day(start)} ${_hm(start, '')} ', File('/nonexistent'), stem);
+  }
+
 
   Future<List<String>> subjects() async {
     if (!await subjectsDir.exists()) return [];
@@ -286,7 +389,14 @@ class Library {
       b.writeln('- **${_hm(s.start)}–${_hm(s.end)}** [${catKey(s.category)}] ${s.title}$link');
       if (s.event.isNotEmpty) b.writeln('  ${s.event}');
       for (final t in [...s.actions, ...s.reminders]) {
-        b.writeln('  - [${t['done'] == true ? 'x' : ' '}] ${t['text']}${(t['when'] ?? '').toString().isNotEmpty ? '（${t['when']}）' : ''}');
+        final when = (t['when'] ?? '').toString().isNotEmpty ? '（${t['when']}）' : '';
+        // 别人的事（宙 #297）：写明是谁的、不给勾选框——不是我要打勾的待办
+        final who = shownWho(t['who']);
+        if (who.isNotEmpty && who != '我们') {
+          b.writeln('  - $who的：${t['text']}$when');
+        } else {
+          b.writeln('  - [${t['done'] == true ? 'x' : ' '}] ${t['text']}$when');
+        }
       }
     }
     await File('$path/每日/$day.md').writeAsString(b.toString());
@@ -302,6 +412,17 @@ class Library {
 String clockOf(double sec) {
   final s = sec.round(), h = s ~/ 3600, m = s % 3600 ~/ 60, x = s % 60;
   return h > 0 ? '$h:${_pad(m)}:${_pad(x)}' : '$m:${_pad(x)}';
+}
+
+/// 改了标题：同一场（同一时刻开头、里面提到同一条录音）的旧文件删掉，别留两份
+Future<void> _dropRenamed(Directory dir, String prefix, File keep, String stem) async {
+  for (final f in dir.listSync().whereType<File>()) {
+    final name = f.uri.pathSegments.last;
+    if (f.path == keep.path || !name.startsWith(prefix) || !name.endsWith('.md')) continue;
+    try {
+      if ((await f.readAsString()).contains(stem)) await f.delete();
+    } catch (_) {}
+  }
 }
 
 String _day(DateTime t) => '${t.year}-${_pad(t.month)}-${_pad(t.day)}';
@@ -363,7 +484,7 @@ String legacyBody(Scene s) {
   list('核心观点', s.views);
   list('有价值的内容', s.valuable);
   list('值得记住的', s.memorable.map((m) => '「${m['text']}」'));
-  list('下一步行动', s.actions.map((a) => '${a['text']}${(a['who'] ?? '') != '' ? '（${a['who']}）' : ''}'));
+  list('下一步行动', s.actions.map((a) => '${a['text']}${shownWho(a['who']).isNotEmpty ? '（${shownWho(a['who'])}）' : ''}'));
   list('提醒事项', s.reminders.map((r) => '${r['text']}${(r['when'] ?? '') != '' ? '（${r['when']}）' : ''}'));
   return b.toString().trim();
 }
@@ -445,3 +566,12 @@ App 收到就改用这个模型，并把命令文件里的 key 抹掉（结果�
 往 `.xiaoer/inbox/` 放 `<名字>.json`（`{"start": "2026-10-25T14:00:00", "lines": [["14:00:05", "说的话"], …]}`，写完再改名成 .json）
 和同名的 `.m4a`（原声，可以没有）。App 收进来，跟录音卡上的一样切场景、按类别整理。
 ''';
+
+Map<String, dynamic>? _jsonMap(String line) {
+  try {
+    final v = jsonDecode(line);
+    return v is Map ? Map<String, dynamic>.from(v) : null;
+  } catch (_) {
+    return null;
+  }
+}

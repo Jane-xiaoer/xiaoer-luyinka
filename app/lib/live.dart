@@ -24,6 +24,8 @@ import 'analyze.dart' show Chat;
 import 'cloud.dart';
 import 'llm.dart';
 import 'store.dart';
+import 'note_doc.dart';
+import 'note_store.dart';
 import 'templates.dart' show VocabEntry, fixWords, plainNotes;
 import 'voices.dart';
 
@@ -434,6 +436,7 @@ class LiveSession extends ChangeNotifier {
   LiveState state = LiveState.idle;
   String title = '';
   String notes = '';
+  List<LineMeta> notesMeta = [LineMeta(newLineId())]; // 和笔记的行一一对应：几点写的、谁写的（note_doc.dart）
   final List<LiveLine> lines = [];
   DateTime? started; // 这场会开录的时刻（原声第 0 秒）
   String? stem;
@@ -543,6 +546,7 @@ class LiveSession extends ChangeNotifier {
       stem = j['stem'];
       title = j['title'] ?? '';
       notes = j['notes'] ?? '';
+      notesMeta = metaOf(notes, j['notes_meta']);
       started = DateTime.tryParse(j['started'] ?? '');
       lines.addAll([
         for (final x in (j['lines'] as List? ?? const [])) LiveLine.fromJson(Map<String, dynamic>.from(x)),
@@ -581,6 +585,7 @@ class LiveSession extends ChangeNotifier {
             'stem': stem,
             'title': title,
             'notes': notes,
+            'notes_meta': [for (final m in notesMeta) m.toJson()],
             'started': started?.toIso8601String(),
             'pausedAt': _pausedAt?.toIso8601String(),
             'lines': [for (final l in lines) l.toJson()],
@@ -597,7 +602,21 @@ class LiveSession extends ChangeNotifier {
     }
   }
 
-  void setNotes(String v) {
+  /// 现在是这场会的第几秒（墙上时间，跟整理时段的 offset 同一把尺子）
+  double? get nowAt => started == null ? null : DateTime.now().difference(started!).inMilliseconds / 1000;
+
+  /// 笔记改了。[src]：me 我打的 · clip 原话挪来的 · ai 顺一下 · carry 带上的旧待办；[at] 新行算第几秒（默认现在）。
+  /// [refs]：新出来的行（按文字）对回哪条旧待办（carry 用）。
+  void setNotes(String v, {String src = 'me', double? at, Map<String, String> refs = const {}}) {
+    final before = notes;
+    notesMeta = alignMeta(before, notesMeta, v, src: src, at: at ?? nowAt);
+    if (refs.isNotEmpty) {
+      final ls = v.split('\n');
+      for (final (i, l) in ls.indexed) {
+        final r = refs[l];
+        if (r != null && notesMeta[i].ref == null && notesMeta[i].src == 'carry') notesMeta[i].ref = r;
+      }
+    }
     notes = v;
     _persist();
   }
@@ -912,7 +931,9 @@ class LiveSession extends ChangeNotifier {
 
   /// 拿这场的原话当背景，把我的笔记理顺（要求在 模板/会议笔记·顺一下.md）。[ask] 是这次额外说的话。
   /// 只返回结果，换不换进笔记由界面决定（要能撤回）。
-  Future<String> polish({String ask = ''}) async {
+  /// [text]：要顺的笔记（不给就是整篇；界面会先拿掉「带上没做完的」那几行）。
+  Future<String> polish({String ask = '', String? text}) async {
+    final notes = text ?? this.notes;
     final llm = Llm.instance;
     final ask0 = chat ?? (llm == null ? null : (String s, String u) => llm.chat(s, u, temperature: 0.3));
     if (ask0 == null) throw Exception('小耳的整理模型还没准备好，稍等再试');
@@ -920,7 +941,12 @@ class LiveSession extends ChangeNotifier {
     var said = [for (final l in lines) l.said].join('\n');
     if (said.length > 30000) said = '…（前面省略）\n${said.substring(said.length - 30000)}';
     final vocab = lib.vocab();
-    final system = [lib.polishPrompt(), if (vocab.isNotEmpty) '\n## 词汇表（转写听错时照这里改）\n$vocab'].join('\n');
+    final system = [
+      lib.polishPrompt(),
+      // 笔记里的待办清单（11-13）：模板是她能改的文件，这条写在代码里，旧模板也照样留着勾选框
+      '\n## 待办清单\n我笔记里「☐」「☑」开头的行是我自己的待办清单（☑ 是做完的）。这两个符号原样留着，别改成编号、别删、别把 ☐ 改成 ☑。',
+      if (vocab.isNotEmpty) '\n## 词汇表（转写听错时照这里改）\n$vocab',
+    ].join('\n');
     final user = [
       '## 会议标题\n$title',
       '## 我的笔记\n${notes.trim().isEmpty ? '（还没记）' : notes.trim()}',
@@ -938,8 +964,8 @@ class LiveSession extends ChangeNotifier {
     if (!active) return null;
     if (state == LiveState.recording) await pause();
     final s = stem!;
-    if (lines.isEmpty) {
-      status = '这场会还没有识别出字，没收进去。可以接着录，或者「放弃」';
+    if (lines.isEmpty && notes.trim().isEmpty) {
+      status = '这场会还没有识别出字，也没记笔记，没收进去。可以接着录，或者「放弃」';
       notifyListeners();
       return null;
     }
@@ -956,14 +982,50 @@ class LiveSession extends ChangeNotifier {
         'lines': out,
         'seconds': elapsed.inMilliseconds / 1000,
         'title': title,
-        'notes': notes.trim(),
+        'notes': notes,
+        'notes_meta': [for (final m in notesMeta) m.toJson()],
         'source': '现场会议',
       };
-      await _saveAudio(s);
-      await lib.writeTranscript(s, res['start'], out);
-      await lib.writeLiveNotes(s, title, started!, notes.trim());
-      await store.putResult(s, {...res, 'scenes': []});
-      store.recs[s] = Rec(s, 0, 'transcribed')..deletedOnCard = true;
+      final todos = noteTodos(notes, notesMeta, store.noteAliases()).where((t) => t.src != 'carry').toList();
+      final sure = todos.where((t) => t.src == 'me' || t.src == 'old').length;
+      lastNotesOnly = lines.isEmpty;
+      if (lines.isEmpty) {
+        // 没出字、只记了笔记：收成一段「开会」，不整理（没有逐字稿）；笔记待办马上进
+        final end = DateTime.now();
+        res['scenes'] = [
+          {
+            'id': '${_stamp(started!)}-lyk',
+            'recording': s,
+            'offset': 0.0,
+            'start': _wallIso(started!),
+            'end': _wallIso(end),
+            'category': '开会',
+            'title': title.trim().isNotEmpty ? title.trim() : firstLineTitle(notes, '现场会议笔记'),
+            'event': '',
+            'place': '',
+            'people': <String>[],
+            'subject': '',
+            'reminders': [],
+            'actions': [],
+            'text': [],
+            'body': '',
+          },
+        ];
+        await store.syncNoteTodos(res);
+        await store.putResult(s, res);
+        await store.writeNotesFile(s, res);
+        final f = _pcmFile(s);
+        if (await f.exists()) await f.delete();
+      } else {
+        await _saveAudio(s);
+        await lib.writeTranscript(s, res['start'], out);
+        await store.writeNotesFile(s, res);
+        await store.putResult(s, {...res, 'scenes': []});
+        store.recs[s] = Rec(s, 0, 'transcribed')..deletedOnCard = true;
+      }
+      noteSummary = todos.isEmpty
+          ? null
+          : '笔记里的待办：$sure 条${lines.isEmpty ? '已' : '整理完'}进「待办」${todos.length > sure ? '，${todos.length - sure} 条（原话挪来的、小耳顺出来的）进「待确认」' : ''}';
       await store.save();
       if (shareMemory) unawaited(_toSharedMemory(res));
       lastSaved = s;
@@ -979,6 +1041,17 @@ class LiveSession extends ChangeNotifier {
       return null;
     }
   }
+
+  /// 撤回「顺一下」：文字和每行的身份一起回去
+  void restoreNotes(String text, List<LineMeta> meta) {
+    notes = text;
+    notesMeta = meta;
+    _persist();
+  }
+
+  /// 收完这场时笔记里的待办去哪了（界面提示一次）
+  String? noteSummary;
+  bool lastNotesOnly = false; // 上一场没出字、只收了笔记
 
   /// 放弃这场（不收进录音卡）。
   Future<void> discard() async {
@@ -998,6 +1071,7 @@ class LiveSession extends ChangeNotifier {
     started = null;
     title = '';
     notes = '';
+    notesMeta = [LineMeta(newLineId())];
     lines.clear();
     _samples = 0;
     _pausedAt = null;

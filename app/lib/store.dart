@@ -11,6 +11,8 @@ import 'package:flutter/foundation.dart';
 import 'analyze.dart';
 import 'drafts.dart';
 import 'library.dart';
+import 'note_doc.dart';
+import 'note_store.dart';
 import 'templates.dart';
 import 'todos.dart';
 
@@ -33,8 +35,10 @@ class Scene {
   List<String> get views => strs('views');
   List<String> get valuable => strs('valuable');
   List<Map<String, dynamic>> get memorable => pairs('memorable');
-  List<Map<String, dynamic>> get actions => pairs('actions');
-  List<Map<String, dynamic>> get reminders => pairs('reminders');
+  // 我在待确认里点了「不是任务」的（dismissed）：每日 md、笔记、件数、按人看、交给 AI 的都不再当待办。
+  // 要看全部（待确认、纠正、合并）的直接用 pairs()。
+  List<Map<String, dynamic>> get actions => [for (final a in pairs('actions')) if (a['dismissed'] != true) a];
+  List<Map<String, dynamic>> get reminders => [for (final a in pairs('reminders')) if (a['dismissed'] != true) a];
   List<List<String>> get text => [for (final x in (d['text'] as List? ?? const [])) List<String>.from(x)];
   // 开会 / 商业洽谈才有：云端单独整理的标准会议纪要（结构化 + 可直接复制的 Markdown）
   Map<String, dynamic>? get minutes => d['minutes'] == null ? null : Map<String, dynamic>.from(d['minutes']);
@@ -53,7 +57,9 @@ String sourceOf(String stem) => stem.startsWith('bean')
     ? 'iPhone'
     : stem.startsWith('live')
         ? '现场会议'
-        : stem.startsWith('voice') || stem.startsWith('note')
+        : stem.startsWith('memo')
+            ? '随手记'
+            : stem.startsWith('voice') || stem.startsWith('note')
             ? '小耳语音'
             : '录音卡';
 
@@ -159,11 +165,12 @@ class Store extends ChangeNotifier {
   Future<void> _saving = Future.value();
 
   /// 排队写：同步时会连着存好几次，并发写同一个临时文件会互相踩。
-  Future<void> save() => _saving = _saving.catchError((_) {}).then((_) async {
+  /// [notify] false：只是进度（拉卡、上传到第几段），存盘但不叫界面整页重画。
+  Future<void> save({bool notify = true}) => _saving = _saving.catchError((_) {}).then((_) async {
         final tmp = File('${_state.path}.tmp');
         await tmp.writeAsString(jsonEncode({'settings': settings, 'recs': recs.values.map((r) => r.toJson()).toList()}));
         await tmp.rename(_state.path);
-        notifyListeners();
+        if (notify) notifyListeners();
       });
 
   Future<void> _loadScenes(String stem) async {
@@ -193,8 +200,8 @@ class Store extends ChangeNotifier {
   Future<void> putResult(String stem, Map<String, dynamic> res) async {
     final before = [for (final s in _scenes[stem] ?? const <Scene>[]) (s.id, s.d['file'] as String?, s.category, s.subject, s.dayKey)];
     final scenes = [for (final s in (res['scenes'] as List? ?? const [])) Scene(Map<String, dynamic>.from(s), stem)];
-    for (final s in scenes.where((s) => !s.noise)) {
-      await lib.writeNote(s);
+    for (final s in scenes.where((s) => !s.noise && !s.stem.startsWith('memo'))) {
+      await lib.writeNote(s); // 随手记的 md 在 随手记/（note_store.writeNotesFile），不在类别文件夹里另存一份
     }
     final files = {for (final s in scenes) s.d['file']};
     for (final (id, file, cat, subject, _) in before) {
@@ -216,6 +223,44 @@ class Store extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 随手记（11-13）：新建一条，没有录音，一段「自言自语」，标题跟着第一行走。返回那一段。
+  Future<Scene> newMemo([DateTime? at]) async {
+    final t = at ?? DateTime.now();
+    String p(int n) => n.toString().padLeft(2, '0');
+    final iso = '${t.year}-${p(t.month)}-${p(t.day)}T${p(t.hour)}:${p(t.minute)}:${p(t.second)}';
+    final stem = 'memo${t.year}${p(t.month)}${p(t.day)}-${p(t.hour)}${p(t.minute)}${p(t.second)}';
+    await putResult(stem, {
+      'start': iso,
+      'lines': [],
+      'title': '',
+      'notes': '',
+      'notes_meta': [],
+      'source': '随手记',
+      'scenes': [
+        {
+          'id': '${stem.substring(4)}-memo', 'recording': stem, 'offset': 0.0, 'start': iso, 'end': iso,
+          'category': '自言自语', 'title': '随手记', 'event': '', 'place': '', 'people': [], 'subject': '',
+          'reminders': [], 'actions': [], 'text': [], 'body': '',
+        },
+      ],
+    });
+    return _scenes[stem]!.first;
+  }
+
+  /// 删掉一条（随手记用）：索引、段的笔记文件、那天的时间线都拿掉。
+  Future<void> dropRecording(String stem) async {
+    final res = readResult(stem);
+    if (res == null) return;
+    await putResult(stem, {...res, 'scenes': []});
+    final f = result(stem);
+    if (await f.exists()) await f.delete();
+    final start = DateTime.tryParse('${res['start'] ?? ''}'.padRight(19).substring(0, 19).trim());
+    if (stem.startsWith('memo') && start != null) await lib.deleteMemoFile(stem, start);
+    _scenes.remove(stem);
+    recs.remove(stem);
+    notifyListeners();
+  }
+
   /// 改了一段（重新整理过）：写回索引和笔记。
   Future<void> putScene(Scene s) async {
     final res = readResult(s.stem);
@@ -226,6 +271,8 @@ class Store extends ChangeNotifier {
 
   /// 给一条待办打勾 / 取消：记在那一条里（done: true），写回索引，每日/ 里的 [ ] 跟着变。
   Future<void> setTodoDone(Todo t, bool done) async {
+    // 笔记里来的：勾笔记那一行（笔记是唯一真相），再从笔记重算
+    if (await editNoteTodo(t, (x, m, id) => setLineDone(x, m, id, done))) return;
     final l = t.scene.d[t.kind];
     if (l is! List || t.index >= l.length) return;
     final m = Map<String, dynamic>.from(l[t.index]);
@@ -237,6 +284,110 @@ class Store extends ChangeNotifier {
     // 换成新列表而不是改原列表那一格：原列表可能带着更窄的类型（比如 List<Map<String, String>>），塞不进 bool
     t.scene.d[t.kind] = [for (final (i, x) in l.indexed) i == t.index ? m : x];
     await putScene(t.scene);
+  }
+
+  /// 把纠正记录套到已经整理好的录音上（不用重新整理）：比如在原型 / 别的地方纠正过的，打开待确认时就生效。
+  /// 只改有变化的录音；返回改了几条录音。
+  Future<int> applyStoredFixes() async {
+    var n = 0;
+    final stems = {for (final s in scenes) s.stem};
+    for (final stem in stems) {
+      final fixes = lib.fixesFor(stem);
+      if (fixes.isEmpty) continue;
+      final res = readResult(stem);
+      if (res == null) continue;
+      var changed = false;
+      final raw = (res['scenes'] as List? ?? const []);
+      final ids = {for (final s in raw) '${(s as Map)['id']}'};
+      final scs = [
+        for (final s in raw)
+          () {
+            final m = Map<String, dynamic>.from(s as Map);
+            for (final k in const ['actions', 'reminders']) {
+              final before = jsonEncode(m[k] ?? const []);
+              m[k] = applyFixes(List<Map<String, dynamic>>.from(m[k] ?? const []), fixes, sceneId: '${m['id']}', sceneIds: ids, list: k);
+              if (jsonEncode(m[k]) != before) changed = true;
+            }
+            return m;
+          }(),
+      ];
+      if (!changed) continue;
+      res['scenes'] = scs;
+      await putResult(stem, res);
+      n++;
+    }
+    // 以前写的每日 md 里，撇掉的还写成「- [ ]」：有撇掉的那几天重写一遍
+    for (final day in {for (final s in scenes) if (s.pairs('actions').any((a) => a['dismissed'] == true) || s.pairs('reminders').any((a) => a['dismissed'] == true)) s.dayKey}) {
+      await lib.writeDay(day, days[day] ?? []);
+    }
+    return n;
+  }
+
+  /// 待确认：我对拆出来的一件事做了选择。改这一条、写回索引，再记进纠正记录（重新整理时记住，也当例子）。
+  /// [kind]：mine 是我的 · owner 是 [who] 的（别人答应的事，照样留着）· not_task 不是任务（撇掉，不进待办）· project 换到 [project]。
+  /// 返回改之前猜的归属（写回台账时说明用）。
+  Future<String> correctTodo(Todo t, String kind, {String who = '', String project = ''}) async {
+    final l = t.scene.d[t.kind];
+    if (l is! List || t.index >= l.length) return '';
+    final m = Map<String, dynamic>.from(l[t.index]);
+    final guess = '${m['who'] ?? ''}';
+    // 笔记里来的（换项目除外）：改笔记那一行——是谁的写成「名字：」，不是任务变成「· 」要点；改过就算我亲手定的
+    if (m['from'] == 'note' && kind != 'project') {
+      final al = noteAliases();
+      final ok = await editNoteTodo(
+        t,
+        (x, ms, id) => kind == 'not_task' ? demoteLine(x, ms, id) : setLineOwner(x, ms, id, kind == 'mine' ? '我' : who, al),
+        meta: (lm) {
+          lm.src = 'me';
+          if (kind != 'not_task') lm.who = kind == 'mine' ? '我' : who; // 名单外的人也认（芯 +46 P2）
+        },
+      );
+      if (ok) return guess;
+    }
+    // 笔记里来的换项目：记在那一行的身份上，重新整理也带着（芯 +46 P3）
+    if (m['from'] == 'note' && kind == 'project') {
+      if (await editNoteTodo(t, (x, _, _) => x, meta: (lm) => lm.project = project)) return guess;
+    }
+    switch (kind) {
+      case 'mine':
+        m['who'] = '我';
+        m.remove('dismissed');
+      case 'owner':
+        m['who'] = who;
+        m.remove('dismissed');
+      case 'not_task':
+        m['dismissed'] = true;
+      case 'project':
+        m['project'] = project;
+      default:
+        throw ArgumentError('不认识的纠正：$kind');
+    }
+    // 换项目只记项目，不算确认：还留在待确认里，等定了是谁的 / 不是任务
+    if (kind != 'project') {
+      m['confirmed'] = true;
+      m['fixed'] = kind == 'mine' ? 'owner' : kind;
+    }
+    t.scene.d[t.kind] = [for (final (i, x) in l.indexed) i == t.index ? m : x];
+    await putScene(t.scene);
+    await lib.addFix({
+      'at': _isoTz(DateTime.now()),
+      'by': '我',
+      'src': '录音卡 App · 待确认',
+      'rec': t.scene.stem,
+      'scene': t.scene.id,
+      'list': t.kind,
+      't': '${m['t'] ?? ''}',
+      'text': '${m['text'] ?? ''}',
+      'said': '${m['said'] ?? ''}',
+      'guess': {'who': guess},
+      'fix': switch (kind) {
+        'mine' => {'kind': 'owner', 'who': '我'},
+        'owner' => {'kind': 'owner', 'who': who},
+        'not_task' => {'kind': 'not_task'},
+        _ => {'kind': 'project', 'project': project},
+      },
+    });
+    return guess;
   }
 
   /// 手动改一段的类别：换成 [cat]、按新类别的模板重新整理（[note] 就是 Analyzer.note），再写回。
@@ -360,4 +511,11 @@ class Store extends ChangeNotifier {
     if (other.isNotEmpty) out['其他'] = other;
     return out;
   }
+}
+
+/// 带时区的时间（2026-11-05T22:28:25+08:00）：纠正记录跟原型、台账一个口径。
+String _isoTz(DateTime t) {
+  final o = t.timeZoneOffset, sign = o.isNegative ? '-' : '+';
+  String p(int n) => n.toString().padLeft(2, '0');
+  return '${t.toIso8601String().substring(0, 19)}$sign${p(o.inHours.abs())}:${p(o.inMinutes.abs() % 60)}';
 }

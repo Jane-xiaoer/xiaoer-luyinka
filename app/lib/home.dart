@@ -8,6 +8,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'analyze.dart';
+import 'confirm.dart';
+import 'ledger.dart';
 import 'bean/sync.dart';
 import 'bean/view.dart';
 import 'card/view.dart';
@@ -23,7 +25,9 @@ import 'live.dart';
 import 'live_view.dart';
 import 'llm.dart';
 import 'md_view.dart';
+import 'notes_card.dart';
 import 'people.dart';
+import 'person_edit.dart';
 import 'progress.dart';
 import 'scroll_selftest.dart';
 import 'search.dart';
@@ -51,16 +55,21 @@ class Home extends StatefulWidget {
 class _HomeState extends State<Home> {
   String? _day;
   String? _sceneId;
-  int _mode = 0; // 0 按天看 · 1 按类别看 · 2 按人看 · 3 待办 · 4 每周回顾 · 5 现场会议 · 6 录音豆 · 7 录音卡
+  int _mode = 0; // 0 按天看 · 1 按类别看 · 2 按人看 · 3 待办 · 4 每周回顾 · 5 现场会议 · 6 录音豆 · 7 录音卡 · 8 待确认 · 9 人员名单 · 10 按项目看
   bool get _byCat => _mode == 1;
   bool get _byPerson => _mode == 2;
+  bool get _byGroup => _mode == 10;
   bool get _todos => _mode == 3;
   bool get _weeks => _mode == 4;
   bool get _live => _mode == 5;
   bool get _beanMode => _mode == 6 && widget.bean != null;
   bool get _cardMode => _mode == 7;
+  bool get _confirm => _mode == 8;
+  bool get _peopleList => _mode == 9;
+  final ledger = Ledger.detect(); // 小耳自己的 Mac 上有经纪人台账：待确认改了顺手写回
   String? _cat;
   String? _person;
+  String? _group; // 按项目：选中的项目
   String? _week; // 每周回顾：选中的那周（2026-W42）
   bool _ideas = false; // 按类别 → 个人感悟：右栏在看「观点 · 按主题」
   final player = Player();
@@ -102,6 +111,12 @@ class _HomeState extends State<Home> {
   void clearSearch() => setState(_resetSearch);
 
   /// 对话里小耳找到的那段：切到那天，右栏打开它。
+  /// 随手记：新建一条空的，打开就能写
+  Future<void> newMemo() async {
+    final s = await store.newMemo();
+    if (mounted) openFound(s);
+  }
+
   void openFound(Scene s) {
     setState(() {
       _resetSearch();
@@ -241,12 +256,157 @@ class _HomeState extends State<Home> {
     return c.isEmpty ? null : c.keys.first;
   }
 
-  List<Person> get people => peopleOf(store.scenes);
+  // 人员名单 + 藏起来的人：文件改了（这里改、人员名单页改、外面改）就重读
+  Roster? _roster;
+  String _rosterStamp = '';
+  Future<List<String>>? _ledgerProjects;
+  Roster get roster {
+    String st(File f) {
+      try {
+        return f.existsSync() ? '${f.lastModifiedSync().microsecondsSinceEpoch}/${f.lengthSync()}' : '-';
+      } catch (_) {
+        return '?';
+      }
+    }
+
+    final stamp = '${st(store.lib.peopleFile)}|${st(store.lib.hiddenPeopleFile)}';
+    if (_roster == null || stamp != _rosterStamp) {
+      _rosterStamp = stamp;
+      _roster = Roster(store.lib.peopleEntries(), hiddenPeople: store.lib.hiddenPeople());
+    }
+    return _roster!;
+  }
+
+  List<Person> get people => peopleOf(store.scenes, roster);
+
+  /// 按项目：写了项目（没写项目就按公司）的人分成的组，段多的在前。
+  List<PersonGroup> get groups => groupsOf(people, store.scenes, roster);
+
+  PersonGroup? get group => groups.where((g) => g.name == _group).firstOrNull ?? groups.firstOrNull;
+
+  void pickGroup(String g) => setState(() {
+        _group = g;
+        _sceneId = null;
+        _draft = null;
+      });
+
+  /// 从组里点一个人：跳到「按人」看他。
+  void openPerson(String name) => setState(() {
+        _mode = 2;
+        _person = name;
+        _sceneId = null;
+        _draft = null;
+      });
+
+  void _prepGroup(PersonGroup g) {
+    final box = _askKey.currentState;
+    if (box == null) return;
+    box.quick(null, '见面前帮我准备：${g.name}', groupPrepPrompt(g.name, g.names), notesOnly: true);
+  }
 
   String? get person {
     final l = people;
-    if (_person != null && l.any((p) => personKey(p.name) == personKey(_person!))) return _person;
+    if (_person != null) {
+      final c = roster.canon(_person!);
+      if (l.any((p) => personKey(p.name) == personKey(c))) return c;
+    }
     return l.isEmpty ? null : l.first.name;
+  }
+
+  Future<void> _saveRoster(List<PersonEntry> list, [List<HiddenPerson>? hidden]) async {
+    try {
+      await store.lib.savePeople(list);
+      if (hidden != null) await store.lib.saveHiddenPeople(hidden);
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('没存上：$e')));
+    }
+    _roster = null;
+  }
+
+  /// 点开一个人写资料（公司 / 项目 / 身份 / 介绍 / 叫法），存进人员名单。
+  Future<void> editPersonInfo(String name) async {
+    final r = roster;
+    final e = r.entry(name) ?? PersonEntry(name, aliases: [name]);
+    List<String> vals(String Function(PersonEntry) f) => {for (final x in r.entries) if (f(x).trim().isNotEmpty) f(x).trim()}.toList();
+    // 台账里的项目名做提示：头一次点时去读（不等它，框先弹出来）
+    _ledgerProjects ??= ledger?.projects().catchError((_) => <String>[]);
+    final projects = vals((x) => x.project); // 同一个 list 交给框，台账读回来再补进去，框里打字时就看得到
+    _ledgerProjects?.then((l) => projects.addAll(l.where((x) => !projects.contains(x))));
+    // 还没写过资料、录音里又有他：小耳先从笔记里看出公司 / 项目 / 身份 / 介绍，框里先填上，Jane 看一眼改改就存
+    final mine = scenesWith(store.scenes, e.name, r);
+    final blank = e.company.isEmpty && e.project.isEmpty && e.note.isEmpty && e.identity.isEmpty;
+    final llm = Llm.instance;
+    final draft = blank && mine.isNotEmpty && llm != null
+        ? llm.chat(draftSystem(e.name), draftNotes(mine)).then(parseDraft).catchError((_) => {'error': '1'})
+        : null;
+    final got = await editPerson(context, e, draft: draft,
+        companies: vals((x) => x.company), projects: projects,
+        taken: r.takenBy(e.name));
+    if (got == null) return;
+    await _saveRoster(upsertPerson(r.entries, e.name, got));
+    if (mounted) setState(() => _person = got.name);
+  }
+
+  /// 「周总」其实就是「周总周宁」：并过去，两边的段合到一起。
+  Future<void> mergePersonInto(String from, [String? to]) async {
+    if (to != null && isMe(to) && !await _confirmMe(from)) return;
+    if (!mounted) return;
+    final into = to ?? await pickMergeTarget(context, from, people);
+    if (into == null) return;
+    final before = [for (final e in roster.entries) e.copy()];
+    await _saveRoster(mergePerson(roster.entries, from, into));
+    if (!mounted) return;
+    setState(() => _person = isMe(into) ? null : into);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(isMe(into) ? '记住了：录音里的「$from」就是你，以后整理录音时这么叫你的事算你的' : '「$from」并进「$into」了'),
+      action: SnackBarAction(label: '撤销', onPressed: () async {
+        await _saveRoster(before);
+        if (mounted) setState(() => _person = from);
+      }),
+    ));
+  }
+
+  /// 「这是我」先问一句：点错了，这个人的事以后全算成我的。
+  Future<bool> _confirmMe(String name) async {
+    final e = roster.entry(name);
+    final info = [if (e != null) ...[e.company, e.project, e.identity]].where((x) => x.isNotEmpty).join(' · ');
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: K.card,
+        title: Text('「$name」就是你？', style: K.title(20).copyWith(color: K.ink)),
+        content: Text(
+            '${info.isEmpty ? '' : '名单上写着他是：$info。\n'}确定的话，以后整理录音时，别人叫「$name」说的事都算你的，按人里也不再列他。',
+            style: TextStyle(fontSize: 14, height: 1.6, color: K.ink)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('不是')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('是我')),
+        ],
+      ),
+    );
+    return ok == true;
+  }
+
+  /// 删掉一个人：名单上拿掉、左栏不再列；录音和段不动，可以撤销 / 在左栏底下找回来。
+  Future<void> deletePerson(String name) async {
+    final before = [for (final e in roster.entries) e.copy()], hidden = store.lib.hiddenPeople();
+    final (list, h) = removePerson(roster.entries, hidden, name);
+    await _saveRoster(list, h);
+    if (!mounted) return;
+    setState(() => _person = null);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text('「$name」不在左栏列了（录音没删）'),
+      action: SnackBarAction(label: '撤销', onPressed: () async {
+        await _saveRoster(before, hidden);
+        if (mounted) setState(() => _person = name);
+      }),
+    ));
+  }
+
+  Future<void> unhidePerson(String name) async {
+    final (list, h) = restorePerson(roster.entries, store.lib.hiddenPeople(), name);
+    await _saveRoster(list, h);
+    if (mounted) setState(() => _person = name);
   }
 
   List<Week> get weeks => weeksOf(store.days.keys);
@@ -263,7 +423,9 @@ class _HomeState extends State<Home> {
       : _weeks
       ? (week == null ? [] : scenesIn(week!, store.scenes))
       : _byPerson
-      ? (person == null ? [] : scenesWith(store.scenes, person!))
+      ? (person == null ? [] : scenesWith(store.scenes, person!, roster))
+      : _byGroup
+      ? (group == null ? [] : scenesInGroup(store.scenes, group!.names, roster))
       : _byCat
           ? (cat == null || cat == draftsKey ? [] : store.byCategory[cat]!)
           : (day == null ? [] : store.days[day] ?? []);
@@ -284,6 +446,8 @@ class _HomeState extends State<Home> {
           ? 'week:${week?.key}'
           : _byPerson
               ? 'person:$person'
+              : _byGroup
+              ? 'group:${group?.name}'
               : (_byCat ? 'cat:$cat' : 'day:$day');
 
   /// 按类别 → 个人感悟时，右栏在看「观点 · 按主题」。
@@ -365,6 +529,13 @@ class _HomeState extends State<Home> {
             body: WeekReview(store: store, week: w, onGenerate: _genWeek),
           )));
 
+  void _personAction(String name, PersonAction a) => switch (a) {
+        PersonAction.edit => editPersonInfo(name),
+        PersonAction.merge => mergePersonInto(name),
+        PersonAction.me => mergePersonInto(name, meName),
+        PersonAction.delete => deletePerson(name),
+      };
+
   void pickPerson(String p) => setState(() {
         _person = p;
         _sceneId = null;
@@ -432,7 +603,10 @@ class _HomeState extends State<Home> {
                 store: store, syncer: widget.syncer, day: _todos ? null : day, onPick: pickDay,
                 mode: _mode, cat: cat, onPickCat: pickCat, onMode: setMode,
                 people: people, person: person, onPickPerson: pickPerson,
+                groups: groups, group: group?.name, onPickGroup: pickGroup,
+                hiddenPeople: [for (final h in roster.hiddenPeople) h.e.name], onPersonAction: _personAction, onUnhidePerson: unhidePerson,
                 todoCount: openTodos, weeks: weeks, week: week?.key, onPickWeek: pickWeek, live: widget.live, bean: widget.bean,
+                onMemo: newMemo,
                 search: SearchField(controller: _search, onChanged: _onSearch, onClear: clearSearch))),
         Expanded(child: _frosted(Container(
           margin: const EdgeInsets.fromLTRB(0, 12, 12, 12),
@@ -446,7 +620,11 @@ class _HomeState extends State<Home> {
               BoxShadow(color: K.dark ? const Color(0x66000000) : const Color(0x261F4A44), blurRadius: 24, offset: const Offset(0, 8)),
             ],
           ),
-          child: _live && !searching
+          child: _confirm && !searching
+              ? ConfirmView(store: store, ledger: ledger, onOpen: openFound, top: 24)
+              : _peopleList && !searching
+              ? PeopleListView(store: store, ledger: ledger, top: 24)
+              : _live && !searching
               ? LiveView(live: widget.live, top: 24)
               : _beanMode && !searching
               ? BeanView(bean: widget.bean!, store: store, onOpen: openFound, top: 24)
@@ -469,9 +647,12 @@ class _HomeState extends State<Home> {
                   ? WeekColumn(store: store, week: week, scenes: scenes, selected: scene?.id,
                       askKey: _askKey, onOpen: openFound, onPick: _pickScene, onReview: _pickReview,
                       onGenerate: _genWeek, top: 34)
+                  : _byGroup
+                  ? GroupColumn(store: store, group: group, scenes: scenes, selected: scene?.id, roster: roster,
+                      onPerson: openPerson, askKey: _askKey, onOpen: openFound, onPick: _pickScene, onPrep: _prepGroup, top: 34)
                   : _byPerson
-                  ? PersonColumn(store: store, person: person, scenes: scenes, selected: scene?.id,
-                      askKey: _askKey, onOpen: openFound, onPick: _pickScene, onPrep: _prep, top: 34)
+                  ? PersonColumn(store: store, person: person, scenes: scenes, selected: scene?.id, roster: roster,
+                      onAction: _personAction, askKey: _askKey, onOpen: openFound, onPick: _pickScene, onPrep: _prep, top: 34)
                   : _byCat
                       ? CatColumn(store: store, cat: cat, scenes: scenes, selected: showIdeas ? null : scene?.id,
                           askKey: _askKey, onOpen: openFound, onPick: _pickScene, top: 34,
@@ -540,6 +721,11 @@ class _HomeState extends State<Home> {
                     avatar: const Icon(Icons.mic_none_rounded, size: 16), label: const Text('现场会议'),
                     selected: _live, onSelected: (_) => setMode(5)),
               ),
+              Padding(
+                padding: const EdgeInsets.only(right: 10, top: 6, bottom: 6),
+                child: ActionChip(
+                    avatar: const Icon(Icons.edit_note_rounded, size: 16), label: const Text('随手记'), onPressed: newMemo),
+              ),
               if (widget.bean != null)
                 Padding(
                   padding: const EdgeInsets.only(right: 10, top: 6, bottom: 6),
@@ -554,7 +740,15 @@ class _HomeState extends State<Home> {
               ),
               Padding(
                 padding: const EdgeInsets.only(right: 8, top: 6, bottom: 6),
+                child: ChoiceChip(label: Text('待确认 ${pendingTodos(store.scenes).length}'), selected: _confirm, onSelected: (_) => setMode(8)),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(right: 8, top: 6, bottom: 6),
                 child: ChoiceChip(label: Text('待办 $openTodos'), selected: _todos, onSelected: (_) => setMode(3)),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(right: 8, top: 6, bottom: 6),
+                child: ChoiceChip(label: const Text('人员名单'), selected: _peopleList, onSelected: (_) => setMode(9)),
               ),
               Padding(
                 padding: const EdgeInsets.only(right: 10, top: 6, bottom: 6),
@@ -565,6 +759,12 @@ class _HomeState extends State<Home> {
                   Padding(
                     padding: const EdgeInsets.only(right: 8, top: 6, bottom: 6),
                     child: ChoiceChip(label: Text(w.label), selected: w.key == week?.key, onSelected: (_) => pickWeek(w.key)),
+                  )
+              else if (_byGroup)
+                for (final g in groups)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8, top: 6, bottom: 6),
+                    child: ChoiceChip(label: Text('${g.name} ${g.names.length}人'), selected: g.name == group?.name, onSelected: (_) => pickGroup(g.name)),
                   )
               else if (_byPerson)
                 for (final p in people)
@@ -578,7 +778,7 @@ class _HomeState extends State<Home> {
                     padding: const EdgeInsets.only(right: 8, top: 6, bottom: 6),
                     child: ChoiceChip(label: Text('${catFolder(e.key)} ${e.value.length}'), selected: e.key == cat, onSelected: (_) => pickCat(e.key)),
                   ),
-              if (_byPerson || _todos || _weeks)
+              if (_byPerson || _byGroup || _todos || _weeks)
                 const SizedBox()
               else if (_byCat)
                 Padding(
@@ -596,7 +796,11 @@ class _HomeState extends State<Home> {
             ]),
           ),
         Expanded(
-          child: _live && !searching
+          child: _confirm && !searching
+              ? ConfirmView(store: store, ledger: ledger, onOpen: openFound)
+              : _peopleList && !searching
+              ? PeopleListView(store: store, ledger: ledger)
+              : _live && !searching
               ? LiveView(live: widget.live)
               : _beanMode && !searching
               ? BeanView(bean: widget.bean!, store: store, onOpen: openFound)
@@ -618,9 +822,12 @@ class _HomeState extends State<Home> {
                         _genWeek(w);
                         _openNarrowReview(w);
                       })
+                  : _byGroup
+                  ? GroupColumn(store: store, group: group, scenes: scenes, selected: null, roster: roster,
+                      onPerson: openPerson, askKey: _askKey, onOpen: openFound, onPick: _openNarrow, onPrep: _prepGroup)
                   : _byPerson
-                  ? PersonColumn(store: store, person: person, scenes: scenes, selected: null,
-                      askKey: _askKey, onOpen: openFound, onPick: _openNarrow, onPrep: _prep)
+                  ? PersonColumn(store: store, person: person, scenes: scenes, selected: null, roster: roster,
+                      onAction: _personAction, askKey: _askKey, onOpen: openFound, onPick: _openNarrow, onPrep: _prep)
                   : _byCat
                   ? CatColumn(store: store, cat: cat, scenes: scenes, selected: null,
                       askKey: _askKey, onOpen: openFound, onPick: _openNarrow, onIdeas: cat == '个人感悟' ? _openIdeas : null)
@@ -662,6 +869,7 @@ class SourceTag extends StatelessWidget {
       'iPhone' => Icons.phone_iphone_rounded,
       '现场会议' => Icons.mic_none_rounded,
       '小耳语音' => Icons.record_voice_over_outlined,
+      '随手记' => Icons.edit_note_rounded,
       _ => Icons.sd_card_outlined,
     };
     return Container(
@@ -725,6 +933,7 @@ class UpdateBar extends StatelessWidget {
         listenable: Updater.instance,
         builder: (context, _) {
           final u = Updater.instance;
+          if (!u.show && u.justUpdated != null) return _justUpdated(context, u);
           if (!u.show) return const SizedBox.shrink();
           final msg = u.status ?? (u.notes.isEmpty ? '修了一些问题，用起来更顺。' : u.notes.split('\n').first);
           final text = Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
@@ -742,6 +951,12 @@ class UpdateBar extends StatelessWidget {
             ],
           ]);
           final buttons = Row(mainAxisSize: MainAxisSize.min, children: [
+            if (!u.busy && u.notes.contains('\n'))
+              TextButton(
+                onPressed: () => _showNotes(context, '新版 ${u.version} 更新了什么', u.notes),
+                style: TextButton.styleFrom(foregroundColor: K.mute),
+                child: const Text('看看更新了什么'),
+              ),
             if (!u.busy) TextButton(onPressed: u.dismiss, style: TextButton.styleFrom(foregroundColor: K.mute), child: const Text('以后再说')),
             const SizedBox(width: 4),
             FilledButton(
@@ -775,6 +990,46 @@ class UpdateBar extends StatelessWidget {
       );
 }
 
+/// 刚更新完：一条「已经更新到 x 了」，能看这次更新了什么
+Widget _justUpdated(BuildContext context, Updater u) {
+  final v = u.justUpdated!;
+  final notes = whatsNew[v] ?? '';
+  return Container(
+    margin: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+    padding: const EdgeInsets.fromLTRB(16, 10, 10, 10),
+    decoration: BoxDecoration(color: K.card, borderRadius: BorderRadius.circular(14), border: Border.all(color: K.accentEdge)),
+    child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+      Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Icon(Icons.celebration_outlined, size: 20, color: K.accent),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+            Text('已经更新到 $v 了', style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700, color: K.ink)),
+            const SizedBox(height: 2),
+            Text(notes.split('\n').first, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12.5, color: K.mute, height: 1.4)),
+          ]),
+        ),
+      ]),
+      Wrap(alignment: WrapAlignment.end, children: [
+        TextButton(onPressed: () => _showNotes(context, '$v 更新了什么', notes), child: const Text('看看更新了什么')),
+        TextButton(onPressed: u.seen, style: TextButton.styleFrom(foregroundColor: K.mute), child: const Text('知道了')),
+      ]),
+    ]),
+  );
+}
+
+void _showNotes(BuildContext context, String title, String notes) => showDialog(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: Text(title),
+        content: SizedBox(
+          width: 520,
+          child: SingleChildScrollView(child: Text(notes, style: const TextStyle(fontSize: 14.5, height: 1.75))),
+        ),
+        actions: [FilledButton(onPressed: () => Navigator.pop(c), child: const Text('好'))],
+      ),
+    );
+
 // ───────── 处理中横幅：有录音在路上就一直挂在列表顶上，说清在干嘛、等多久、卡没卡住 ─────────
 
 class ProgressBanner extends StatefulWidget {
@@ -805,7 +1060,12 @@ class _ProgressBannerState extends State<ProgressBanner> {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ListenableBuilder(
+      // 拉卡 / 转写的进度只叫这条重画，不叫整页（syncer.tick）
+      listenable: Listenable.merge([widget.syncer.tick, widget.store]),
+      builder: (context, _) => _build(context));
+
+  Widget _build(BuildContext context) {
     final pend = widget.store.pending;
     final r = featured(pend);
     if (r == null) return const SizedBox.shrink();
@@ -1029,11 +1289,19 @@ class Sidebar extends StatelessWidget {
   final void Function(String)? onPickWeek;
   final LiveSession? live;
   final BeanSyncer? bean;
+  final List<String> hiddenPeople;
+  final List<PersonGroup> groups;
+  final String? group;
+  final void Function(String)? onPickGroup;
+  final void Function(String, PersonAction)? onPersonAction;
+  final void Function(String)? onUnhidePerson;
+  final VoidCallback? onMemo;
   const Sidebar(
       {super.key, required this.store, required this.syncer, required this.day, required this.onPick,
       required this.mode, required this.cat, required this.onPickCat, required this.onMode,
       required this.people, required this.person, required this.onPickPerson, this.search,
-      this.todoCount = 0, this.weeks = const [], this.week, this.onPickWeek, this.live, this.bean});
+      this.todoCount = 0, this.weeks = const [], this.week, this.onPickWeek, this.live, this.bean,
+      this.hiddenPeople = const [], this.groups = const [], this.group, this.onPickGroup, this.onPersonAction, this.onUnhidePerson, this.onMemo});
 
   @override
   Widget build(BuildContext context) => Container(
@@ -1050,8 +1318,23 @@ class Sidebar extends StatelessWidget {
               MeetButton(live: live, selected: mode == 5, onTap: () => onMode(5)),
             ]),
           ),
-          if (search != null) Padding(padding: const EdgeInsets.fromLTRB(12, 0, 12, 10), child: search),
-          // 看内容：按天 / 按类别 / 按人，左栏主体
+          if (search != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+              child: Row(children: [
+                Expanded(child: search!),
+                if (onMemo != null) ...[
+                  const SizedBox(width: 6),
+                  IconButton(
+                    tooltip: '随手记：不录音，直接打字记（☐ 待办也会进待办）',
+                    style: IconButton.styleFrom(backgroundColor: K.card.withValues(alpha: 0.85)),
+                    icon: Icon(Icons.edit_note_rounded, size: 20, color: K.ink),
+                    onPressed: onMemo,
+                  ),
+                ],
+              ]),
+            ),
+          // 看内容：按天 / 按类别 / 按人 / 按项目，左栏主体
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
             child: ModeSwitch(mode: mode, onMode: onMode),
@@ -1059,7 +1342,9 @@ class Sidebar extends StatelessWidget {
           Expanded(
               child: switch (mode) {
             1 => CatNav(store: store, cat: cat, onPick: onPickCat),
-            2 => PeopleNav(people: people, person: person, onPick: onPickPerson),
+            2 => PeopleNav(people: people, person: person, onPick: onPickPerson,
+                onAction: onPersonAction, hidden: hiddenPeople, onUnhide: onUnhidePerson),
+            10 => GroupNav(groups: groups, group: group, onPick: (g) => onPickGroup?.call(g)),
             4 => WeekNav(store: store, weeks: weeks, week: week, onPick: (k) => onPickWeek?.call(k)),
             _ => DayNav(store: store, days: daysWithPending(store.days.keys, store.pending), day: day, onPick: onPick),
           }),
@@ -1067,8 +1352,10 @@ class Sidebar extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.fromLTRB(10, 0, 10, 0),
             child: Column(children: [
+              NavRow(icon: Icons.fact_check_outlined, text: '待确认', count: pendingTodos(store.scenes).length, selected: mode == 8, onTap: () => onMode(8)),
               NavRow(icon: Icons.checklist_rounded, text: '待办', count: todoCount, selected: mode == 3, onTap: () => onMode(3)),
               NavRow(icon: Icons.event_note_outlined, text: '每周回顾', selected: mode == 4, onTap: () => onMode(4)),
+              NavRow(icon: Icons.people_outline, text: '人员名单', selected: mode == 9, onTap: () => onMode(9)),
             ]),
           ),
           _rule(),
@@ -1079,7 +1366,7 @@ class Sidebar extends StatelessWidget {
               DeviceRow(
                 icon: Icons.sd_card_outlined,
                 name: '录音卡',
-                listen: store,
+                listen: Listenable.merge([store, syncer.tick]),
                 status: () => _cardLine(),
                 on: () => syncer.card.connected || store.pending.any((r) => sourceOf(r.stem) == '录音卡'),
                 selected: mode == 7,
@@ -1206,7 +1493,7 @@ class ModeSwitch extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(3),
       decoration: BoxDecoration(color: K.dark ? K.cardDeep : K.cardDeep.withValues(alpha: 0.55), borderRadius: BorderRadius.circular(12)),
-      child: Row(mainAxisSize: compact ? MainAxisSize.min : MainAxisSize.max, children: [seg('按天', 0), seg('按类别', 1), seg('按人', 2)]),
+      child: Row(mainAxisSize: compact ? MainAxisSize.min : MainAxisSize.max, children: [seg('按天', 0), seg('按类别', 1), seg('按人', 2), seg('按项目', 10)]),
     );
   }
 }
@@ -1315,47 +1602,257 @@ class CatNav extends StatelessWidget {
   }
 }
 
-/// 左栏（按人）：所有出现过的人 + 出现在几段里，多的在前。
+/// 在一个人身上能做的事：写资料 / 并到另一个人 / 删掉。
+enum PersonAction { edit, merge, me, delete }
+
+/// 左栏（按人）：所有出现过的人 + 出现在几段里，多的在前。写了公司 / 项目的按它分组；
+/// 每个人右边「⋯」（或右键）能写资料、并人、删人；底下能找回删掉的人。
 class PeopleNav extends StatelessWidget {
   final List<Person> people;
   final String? person;
   final void Function(String) onPick;
-  const PeopleNav({super.key, required this.people, required this.person, required this.onPick});
+  final void Function(String, PersonAction)? onAction;
+  final List<String> hidden; // 删掉的人（一人一项）
+  final void Function(String)? onUnhide;
+  const PeopleNav(
+      {super.key, required this.people, required this.person, required this.onPick, this.onAction, this.hidden = const [], this.onUnhide});
 
   @override
   Widget build(BuildContext context) {
-    if (people.isEmpty) {
+    if (people.isEmpty && hidden.isEmpty) {
       return Padding(
         padding: EdgeInsets.all(16),
         child: Text('整理好的记录里还没认出人名。', style: TextStyle(fontSize: 13, color: K.faint)),
       );
     }
+    // 分组：段数多的组在前，「没分组」放最后；谁都没写公司 / 项目时不出组名
+    final groups = <String, List<Person>>{};
+    for (final p in people) {
+      (groups[p.group] ??= []).add(p);
+    }
+    int total(String g) => groups[g]!.fold(0, (a, p) => a + p.count);
+    final keys = groups.keys.toList()
+      ..sort((a, b) => a.isEmpty != b.isEmpty ? (a.isEmpty ? 1 : -1) : total(b).compareTo(total(a)));
+    final titled = keys.any((k) => k.isNotEmpty);
     return ListView(padding: const EdgeInsets.symmetric(horizontal: 10), children: [
-      for (final p in people)
+      for (final g in keys) ...[
+        if (titled)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
+            child: Row(children: [
+              Expanded(
+                  child: Text(g.isEmpty ? '没分组' : g, overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 12, color: K.faint, fontWeight: FontWeight.w600, letterSpacing: 0.5))),
+              Text('${groups[g]!.length} 人', style: TextStyle(fontSize: 11, color: K.faint)),
+            ]),
+          ),
+        for (final p in groups[g]!)
+          _PersonNavRow(p: p, selected: p.name == person, onTap: () => onPick(p.name), onAction: onAction),
+      ],
+      if (hidden.isNotEmpty && onUnhide != null)
         Padding(
-          padding: const EdgeInsets.only(bottom: 2),
+          padding: const EdgeInsets.fromLTRB(4, 8, 4, 8),
+          child: PopupMenuButton<String>(
+            tooltip: '找回删掉的人',
+            onSelected: onUnhide,
+            itemBuilder: (_) => [for (final h in (hidden.toList()..sort())) PopupMenuItem(value: h, child: Text('找回「$h」'))],
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              child: Text('删掉的 ${hidden.length} 人', style: TextStyle(fontSize: 12, color: K.faint, decoration: TextDecoration.underline)),
+            ),
+          ),
+        ),
+    ]);
+  }
+}
+
+class _PersonNavRow extends StatefulWidget {
+  final Person p;
+  final bool selected;
+  final VoidCallback onTap;
+  final void Function(String, PersonAction)? onAction;
+  const _PersonNavRow({required this.p, required this.selected, required this.onTap, this.onAction});
+  @override
+  State<_PersonNavRow> createState() => _PersonNavRowState();
+}
+
+class _PersonNavRowState extends State<_PersonNavRow> {
+  bool hover = false;
+
+  static List<PopupMenuEntry<PersonAction>> items() => const [
+        PopupMenuItem(value: PersonAction.edit, child: Text('写资料（公司 / 项目 / 介绍）')),
+        PopupMenuItem(value: PersonAction.merge, child: Text('并到另一个人…')),
+        PopupMenuItem(value: PersonAction.me, child: Text('这是我（别人这么叫我）')),
+        PopupMenuDivider(),
+        PopupMenuItem(value: PersonAction.delete, child: Text('删掉')),
+      ];
+
+  Future<void> _menuAt(Offset at) async {
+    final a = await showMenu<PersonAction>(
+        context: context, position: RelativeRect.fromLTRB(at.dx, at.dy, at.dx, at.dy), items: items());
+    if (a != null) widget.onAction?.call(widget.p.name, a);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = widget.p, sel = widget.selected, act = widget.onAction != null;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 2),
+      child: MouseRegion(
+        onEnter: (_) => setState(() => hover = true),
+        onExit: (_) => setState(() => hover = false),
+        child: GestureDetector(
+          onSecondaryTapUp: act ? (d) => _menuAt(d.globalPosition) : null,
           child: Material(
-            color: p.name == person ? K.card : Colors.transparent,
+            color: sel ? K.card : Colors.transparent,
             borderRadius: BorderRadius.circular(10),
             child: InkWell(
               borderRadius: BorderRadius.circular(10),
-              onTap: () => onPick(p.name),
+              onTap: widget.onTap,
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 child: Row(children: [
-                  Icon(Icons.person_outline, size: 16, color: p.name == person ? K.accent : K.faint),
+                  Icon(Icons.person_outline, size: 16, color: sel ? K.accent : K.faint),
                   const SizedBox(width: 8),
                   Expanded(
                       child: Text(p.name, overflow: TextOverflow.ellipsis,
-                          style: TextStyle(fontWeight: p.name == person ? FontWeight.w600 : FontWeight.w400,
-                              color: p.name == person ? K.ink : K.mute))),
-                  Text('${p.count}',
-                      style: TextStyle(fontSize: 12, color: p.name == person ? K.accent : K.faint, fontWeight: FontWeight.w600)),
+                          style: TextStyle(fontWeight: sel ? FontWeight.w600 : FontWeight.w400, color: sel ? K.ink : K.mute))),
+                  if (act && (hover || sel))
+                    SizedBox(
+                      width: 22,
+                      height: 18,
+                      child: PopupMenuButton<PersonAction>(
+                        tooltip: '管理这个人',
+                        padding: EdgeInsets.zero,
+                        iconSize: 16,
+                        icon: Icon(Icons.more_horiz, size: 16, color: K.mute),
+                        onSelected: (a) => widget.onAction!(p.name, a),
+                        itemBuilder: (_) => items(),
+                      ),
+                    )
+                  else
+                    Text('${p.count}', style: TextStyle(fontSize: 12, color: sel ? K.accent : K.faint, fontWeight: FontWeight.w600)),
                 ]),
               ),
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// 左栏（按项目）：每个项目一行，几个人。
+class GroupNav extends StatelessWidget {
+  final List<PersonGroup> groups;
+  final String? group;
+  final void Function(String) onPick;
+  const GroupNav({super.key, required this.groups, required this.group, required this.onPick});
+
+  @override
+  Widget build(BuildContext context) {
+    if (groups.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.all(16),
+        child: Text('还没给人写项目。到「按人」里点开一个人点「写资料」，填了跟哪个项目，就按项目归到这里；一个人跟几个项目用「、」隔开。',
+            style: TextStyle(fontSize: 13, height: 1.5, color: K.faint)),
+      );
+    }
+    return ListView(padding: const EdgeInsets.symmetric(horizontal: 10), children: [
+      for (final g in groups)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 2),
+          child: Material(
+            color: g.name == group ? K.card : Colors.transparent,
+            borderRadius: BorderRadius.circular(10),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(10),
+              onTap: () => onPick(g.name),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                child: Row(children: [
+                  Icon(Icons.folder_outlined, size: 16, color: g.name == group ? K.accent : K.faint),
+                  const SizedBox(width: 8),
+                  Expanded(
+                      child: Text(g.name, overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontWeight: g.name == group ? FontWeight.w600 : FontWeight.w400,
+                              color: g.name == group ? K.ink : K.mute))),
+                  Text('${g.names.length} 人', style: TextStyle(fontSize: 12, color: g.name == group ? K.accent : K.faint)),
+                ]),
+              ),
+            ),
+          ),
+        ),
+    ]);
+  }
+}
+
+/// 中栏（按项目）：项目名、对方公司、组里的人（谁、哪家、跟我什么关系）（点了去按人看他），往来小结（整组的待办、见面前准备），跟组里任何人有关的段。
+class GroupColumn extends StatelessWidget {
+  final Store store;
+  final PersonGroup? group;
+  final List<Scene> scenes;
+  final String? selected;
+  final Roster? roster;
+  final void Function(String) onPerson;
+  final void Function(Scene) onPick;
+  final void Function(PersonGroup) onPrep;
+  final double top;
+  final Key? askKey;
+  final void Function(Scene)? onOpen;
+  const GroupColumn(
+      {super.key, required this.store, required this.group, required this.scenes, required this.selected, required this.onPerson,
+      required this.onPick, required this.onPrep, this.roster, this.top = 20, this.askKey, this.onOpen});
+
+  @override
+  Widget build(BuildContext context) {
+    if (group == null) return const Hint('wave', '还没有项目', '到「按人」里给人写上跟哪个项目，同一个项目的人就会归到一起。');
+    final g = group!;
+    final total = scenes.fold<Duration>(Duration.zero, (a, s) => a + s.end.difference(s.start));
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Padding(
+        padding: EdgeInsets.fromLTRB(24, top, 20, 12),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(g.name, style: K.title(26).copyWith(color: K.ink)),
+          const SizedBox(height: 2),
+          const Squiggle(width: 132),
+          const SizedBox(height: 10),
+          Wrap(spacing: 6, runSpacing: 6, children: [
+            _Stat(Icons.view_agenda_outlined, '${scenes.length} 段'),
+            _Stat(Icons.mic_none, '共 ${duration(total)}'),
+            for (final c in {for (final p in g.members) (p.entry?.company ?? '').trim()}.where((c) => c.isNotEmpty))
+              _Stat(Icons.apartment_outlined, c),
+          ]),
+          const SizedBox(height: 10),
+          Wrap(spacing: 6, runSpacing: 6, children: [
+            for (final p in g.members)
+              ActionChip(
+                avatar: Icon(Icons.person_outline, size: 15, color: K.accent),
+                // 谁 · 跟我什么关系 · 哪家公司
+                label: Text([
+                  p.name,
+                  if ((p.entry?.identity ?? '').isNotEmpty) p.entry!.identity,
+                  if ((p.entry?.company ?? '').trim().isNotEmpty) p.entry!.company.trim(),
+                ].join(' · ')),
+                tooltip: (p.entry?.note ?? '').isEmpty ? '去按人看${p.name}' : p.entry!.note,
+                onPressed: () => onPerson(p.name),
+              ),
+          ]),
+        ]),
+      ),
+      Expanded(
+        child: AskBox(
+          key: askKey, store: store, scenes: scenes, all: store.scenes, onOpen: onOpen,
+          topic: 'group:${g.name}', focus: _focus(scenes, selected),
+          hint: '问问小耳：跟${g.name}之间…也可以让它帮你准备见面',
+          child: ListView(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6), children: [
+            PersonSummary(name: g.name, scenes: scenes, roster: roster, todos: todosInGroup(scenes, g.names, roster),
+                onPrep: () => onPrep(g), onOpen: onPick),
+            const SizedBox(height: 10),
+            for (final s in scenes) SceneRow(scene: s, selected: s.id == selected, onTap: () => onPick(s), showDate: true),
+          ]),
+        ),
+      ),
     ]);
   }
 }
@@ -1551,9 +2048,11 @@ class PersonColumn extends StatelessWidget {
   final double top;
   final Key? askKey;
   final void Function(Scene)? onOpen;
+  final Roster? roster;
+  final void Function(String, PersonAction)? onAction;
   const PersonColumn(
       {super.key, required this.store, required this.person, required this.scenes, required this.selected, required this.onPick,
-      required this.onPrep, this.top = 20, this.askKey, this.onOpen});
+      required this.onPrep, this.top = 20, this.askKey, this.onOpen, this.roster, this.onAction});
 
   @override
   Widget build(BuildContext context) {
@@ -1572,6 +2071,10 @@ class PersonColumn extends StatelessWidget {
             _Stat(Icons.view_agenda_outlined, '${scenes.length} 段'),
             _Stat(Icons.mic_none, '共 ${duration(total)}'),
           ]),
+          if (onAction != null) ...[
+            const SizedBox(height: 10),
+            PersonProfile(name: name, entry: roster?.entry(name), onAction: (a) => onAction!(name, a)),
+          ],
         ]),
       ),
       Expanded(
@@ -1580,12 +2083,63 @@ class PersonColumn extends StatelessWidget {
           topic: 'person:$name', focus: _focus(scenes, selected),
           hint: '问问小耳：跟$name之间…也可以让它帮你准备见面',
           child: ListView(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6), children: [
-            PersonSummary(name: name, scenes: scenes, onPrep: () => onPrep(name), onOpen: onPick),
+            PersonSummary(name: name, scenes: scenes, roster: roster, onPrep: () => onPrep(name), onOpen: onPick),
             const SizedBox(height: 10),
             for (final s in scenes) SceneRow(scene: s, selected: s.id == selected, onTap: () => onPick(s), showDate: true),
           ]),
         ),
       ),
+    ]);
+  }
+}
+
+/// 中栏（按人）名字下面：这个人是谁（公司 · 项目 · 身份、介绍、也叫），和「写资料 / 并到另一个人 / 删掉」。
+class PersonProfile extends StatelessWidget {
+  final String name;
+  final PersonEntry? entry;
+  final void Function(PersonAction) onAction;
+  const PersonProfile({super.key, required this.name, required this.entry, required this.onAction});
+
+  @override
+  Widget build(BuildContext context) {
+    final e = entry;
+    final tags = [if (e != null) ...[e.company, e.project, e.identity]].where((x) => x.trim().isNotEmpty).toList();
+    final also = e == null ? <String>[] : e.aliases.where((a) => personKey(a) != personKey(name)).toList();
+    final empty = tags.isEmpty && (e?.note ?? '').isEmpty;
+    Widget btn(IconData i, String t, PersonAction a) => TextButton.icon(
+        style: TextButton.styleFrom(foregroundColor: a == PersonAction.edit ? K.accent : K.mute, visualDensity: VisualDensity.compact,
+            padding: const EdgeInsets.symmetric(horizontal: 8)),
+        onPressed: () => onAction(a),
+        icon: Icon(i, size: 15),
+        label: Text(t, style: const TextStyle(fontSize: 13)));
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      if (empty)
+        Text('还没写$name是谁（哪个公司、哪个项目）', style: TextStyle(fontSize: 13, color: K.faint))
+      else ...[
+        if (tags.isNotEmpty)
+          Wrap(spacing: 6, runSpacing: 6, children: [
+            for (final t in tags)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+                decoration: BoxDecoration(color: K.accentSoft, borderRadius: BorderRadius.circular(8)),
+                child: Text(t, style: TextStyle(fontSize: 12.5, color: K.ink)),
+              ),
+          ]),
+        if (e!.note.isNotEmpty) Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(e.note, style: TextStyle(fontSize: 13.5, height: 1.6, color: K.ink))),
+      ],
+      if (also.isNotEmpty)
+        Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text('录音里也叫：${also.join('、')}', style: TextStyle(fontSize: 12.5, color: K.mute))),
+      const SizedBox(height: 4),
+      Wrap(spacing: 2, children: [
+        btn(Icons.edit_outlined, empty ? '写资料' : '改资料', PersonAction.edit),
+        btn(Icons.call_merge, '并到另一个人', PersonAction.merge),
+        btn(Icons.face_outlined, '这是我', PersonAction.me),
+        btn(Icons.delete_outline, '删掉', PersonAction.delete),
+      ]),
     ]);
   }
 }
@@ -1596,12 +2150,15 @@ class PersonSummary extends StatelessWidget {
   final List<Scene> scenes; // 新的在前
   final VoidCallback onPrep;
   final void Function(Scene) onOpen;
-  const PersonSummary({super.key, required this.name, required this.scenes, required this.onPrep, required this.onOpen});
+  final Roster? roster;
+  final List<PersonTodo>? todos; // 按项目：整组的待办；不给就按 name 找
+  const PersonSummary(
+      {super.key, required this.name, required this.scenes, required this.onPrep, required this.onOpen, this.roster, this.todos});
 
   @override
   Widget build(BuildContext context) {
     final last = scenes.firstOrNull;
-    final todos = todosWith(scenes, name);
+    final todos = this.todos ?? todosWith(scenes, name, roster);
     final body = TextStyle(fontSize: 13.5, height: 1.6, color: K.ink);
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 12, 12, 10),
@@ -2258,6 +2815,10 @@ class _SceneDetailState extends State<SceneDetail> {
 
   void _play(String clock) => player.play(store, scene.stem, _offsetOf(clock), clock);
 
+  // 随手记、没出字只有笔记的会：没有录音 / 逐字稿
+  bool _hasAudio(Scene s) => !s.stem.startsWith('memo') && store.audio(s.stem).existsSync();
+  bool _hasText(Scene s) => !s.stem.startsWith('memo') && store.scenes.any((x) => x.stem == s.stem && x.text.isNotEmpty);
+
   Widget _box(String head, IconData icon, Color color, List<Widget> lines, {Color? bg}) => Container(
         padding: const EdgeInsets.fromLTRB(18, 16, 18, 12),
         decoration: BoxDecoration(color: bg ?? K.cardDeep, borderRadius: BorderRadius.circular(16)),
@@ -2309,7 +2870,7 @@ class _SceneDetailState extends State<SceneDetail> {
   @override
   Widget build(BuildContext context) => ValueListenableBuilder<bool>(
         valueListenable: SceneDetail.transcriptTab,
-        builder: (context, tx, _) => _build(context, tx),
+        builder: (context, tx, _) => _build(context, tx && _hasText(scene)),
       );
 
   /// 这一段的逐字稿拷贝按钮：纯文字 / 带时间 / 整条录音；Mac 上还有「在 Finder 显示」。
@@ -2349,7 +2910,7 @@ class _SceneDetailState extends State<SceneDetail> {
       Wrap(spacing: 14, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
         CategoryChip(scene: s, store: store),
         SourceTag(s.stem),
-        meta(Icons.schedule, '${hm(s.start)}–${hm(s.end)} · ${duration(s.end.difference(s.start))}'),
+        meta(Icons.schedule, s.stem.startsWith('memo') ? hm(s.start) : '${hm(s.start)}–${hm(s.end)} · ${duration(s.end.difference(s.start))}'),
         if (s.place.isNotEmpty) meta(Icons.place_outlined, s.place),
         if (s.people.isNotEmpty) meta(Icons.people_outline, s.people.join('、')),
         if (s.subject.isNotEmpty) meta(Icons.travel_explore, '调研对象：${s.subject}'),
@@ -2360,12 +2921,12 @@ class _SceneDetailState extends State<SceneDetail> {
       const Squiggle(width: 96),
       const SizedBox(height: 8),
       SelectableText(s.event, style: const TextStyle(fontSize: 15, height: 1.7)),
-      if (!s.noise) ...[
+      if (!s.noise && _hasText(s)) ...[
         const SizedBox(height: 8),
         MergeBar(scene: s, store: store, onMerged: widget.onMerged, onRecut: widget.onRecut),
       ],
       const SizedBox(height: 12),
-      Align(
+      if (_hasText(s)) Align(
         alignment: Alignment.centerLeft,
         child: SegmentedButton<bool>(
           segments: const [
@@ -2399,7 +2960,19 @@ class _SceneDetailState extends State<SceneDetail> {
         QuickBar(scene: s, store: store, onQuick: widget.onQuick!),
       ],
       const SizedBox(height: 16),
-      if (!s.noise) ...[NoteCard(scene: s, store: store), const SizedBox(height: 12)],
+      // 现场会议 / 随手记：我自己记的笔记放最上面（只在这场第一段），能直接改
+      if (showsNotes(store, s)) ...[
+        MyNotesCard(
+          key: ValueKey('notes/${s.stem}'),
+          scene: s,
+          store: store,
+          onPlay: _hasAudio(s) ? (at, label) => player.play(store, s.stem, at, label) : null,
+          onRecut: _hasText(s) && widget.onRecut != null ? () => widget.onRecut!(s.stem) : null,
+          autofocus: s.stem.startsWith('memo'),
+        ),
+        const SizedBox(height: 12),
+      ],
+      if (!s.noise && !s.stem.startsWith('memo')) ...[NoteCard(scene: s, store: store), const SizedBox(height: 12)],
       if (s.body.isEmpty && s.minutes != null) ...[Minutes(scene: s), const SizedBox(height: 12)],
       if (s.body.isEmpty) LayoutBuilder(builder: (_, c) {
         final boxes = [
@@ -2435,14 +3008,16 @@ class _SceneDetailState extends State<SceneDetail> {
             ),
         ]),
       ],
-      const SizedBox(height: 18),
-      Wrap(spacing: 10, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
-        const Label('逐字稿'),
-        Text('点时间从那里听', style: TextStyle(fontSize: 12, color: K.faint)),
-        _tools(s),
-      ]),
-      const SizedBox(height: 8),
-      ..._lines(s, body),
+      if (_hasText(s)) ...[
+        const SizedBox(height: 18),
+        Wrap(spacing: 10, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
+          const Label('逐字稿'),
+          Text('点时间从那里听', style: TextStyle(fontSize: 12, color: K.faint)),
+          _tools(s),
+        ]),
+        const SizedBox(height: 8),
+        ..._lines(s, body),
+      ],
     ]);
   }
 }

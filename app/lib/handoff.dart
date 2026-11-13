@@ -10,6 +10,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import 'store.dart';
+import 'templates.dart' show shownWho;
 import 'theme.dart';
 
 const defaultRules = '''按下面的规则处理我录音卡这一天的整理结果：
@@ -40,7 +41,7 @@ String dayMarkdown(String day, List<Scene> scenes, {bool fullText = true}) {
     list('核心观点', s.views);
     list('有价值的内容', s.valuable);
     list('值得记住的', s.memorable.map((m) => '[${m['t']}] ${m['text']}'));
-    list('下一步行动', s.actions.map((a) => '${a['text']}${(a['who'] ?? '') != '' ? '（${a['who']}）' : ''}'));
+    list('下一步行动', s.actions.map((a) => '${a['text']}${shownWho(a['who']).isNotEmpty ? '（${shownWho(a['who'])}）' : ''}'));
     list('提醒事项', s.reminders.map((r) => '${r['text']}${(r['when'] ?? '') != '' ? '（${r['when']}）' : ''}'));
     if (s.body.isNotEmpty) {
       b.writeln('\n${s.body.replaceAllMapped(RegExp(r'^(#+) ', multiLine: true), (m) => '##${m[1]} ')}');

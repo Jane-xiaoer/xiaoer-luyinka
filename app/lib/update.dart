@@ -16,6 +16,19 @@ import 'package:pointycastle/digests/sha256.dart';
 
 import 'cloud.dart';
 
+/// 每一版更新了什么（App 里带着）：更新完第一次打开，挂一条「已经更新到 x 了」，点开看这里。
+/// 第一行是一句话总结。服务器上的 更新说明.txt 用同一段（还没更新的人在「有新版」那条里看到）。
+const whatsNew = {
+  '1.3.0': '''开会记笔记像备忘录一样好用了，笔记里的待办开完会自动进「待办」。
+· 现场会议右边直接打字记：待办（点圆圈打勾）、要点、编号、标题、加粗、黄底重点、找字；回车自动接下一条，Tab 缩进，打 @ 从人员名单挑人
+· 开会时点「带上没做完的事」，把以前没做完的插进来；会上打勾，原来那条也跟着勾
+· 开完会：你打的待办直接进「待办」；小耳整理会议时以你的笔记为主线；点开这场会，最上面就是你的笔记，能接着改，还能「对着录音听」
+· 新增「随手记」（左栏搜索框旁的小图标）：不录音，直接打字记，待办一样进待办
+· 人员管理：按人里能写资料（公司、项目、介绍）、删人、并人、标「这是我」；顶上新增「按项目」，一个项目一组
+· 开会时「这是谁？」可以直接从人员名单里选
+· 从卡上拉录音时界面不再卡；另外修了一些问题''',
+};
+
 const teamId = '3DP32PZ62M'; // Developer ID Application: Juan Li —— 不是这个签名的包一律不装
 
 /// [a] 比 [b] 新（按点分开的数字比：1.2.10 > 1.2.9）。
@@ -55,6 +68,9 @@ class Updater extends ChangeNotifier {
   String? Function()? blocker;
   Timer? _timer;
 
+  /// 刚更新完（这台设备上次用的是旧版）：挂一条「已经更新到 x 了」，点「知道了」收起
+  String? justUpdated;
+
   String get version => latest?['version'] ?? '';
   String get notes => latest?['notes'] ?? '';
   bool get show => latest != null && !later;
@@ -66,6 +82,7 @@ class Updater extends ChangeNotifier {
     } catch (_) {
       return;
     }
+    await _checkJustUpdated();
     await check();
     _timer ??= Timer.periodic(const Duration(hours: 6), (_) => check());
   }
@@ -95,6 +112,25 @@ class Updater extends ChangeNotifier {
       } catch (_) {}
     }
     return packageFor(j, mac: Platform.isMacOS, arm64: arm64);
+  }
+
+  /// 记下这台设备用过的版本：跟上次不一样（或者是老用户第一次有这个记录）就算刚更新完。
+  Future<void> _checkJustUpdated() async {
+    try {
+      final dir = Directory('${(await getApplicationSupportDirectory()).path}/luyinka');
+      final f = File('${dir.path}/用过的版本.txt');
+      final before = f.existsSync() ? f.readAsStringSync().trim() : null;
+      final oldUser = File('${dir.path}/state.json').existsSync(); // 1.2.x 的老用户：以前没记，但用过
+      if (before != current && (before != null || oldUser) && whatsNew.containsKey(current)) justUpdated = current;
+      dir.createSync(recursive: true);
+      f.writeAsStringSync(current);
+      if (justUpdated != null) notifyListeners();
+    } catch (_) {}
+  }
+
+  void seen() {
+    justUpdated = null;
+    notifyListeners();
   }
 
   void dismiss() {

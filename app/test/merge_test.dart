@@ -53,14 +53,14 @@ void main() {
     test('边界两边是同一场合（开会 / 我的分享、人物有交集、时间接得上）就合成一段', () {
       final out = joinWindows([
         raw(0, 0, 900, '我的分享', people: ['董老师'], title: '讲 VI 方案'),
-        raw(1, 905, 1500, '开会', people: ['董老师', '刘康'], title: '方案反馈'),
+        raw(1, 905, 1500, '开会', people: ['董老师', '李航'], title: '方案反馈'),
       ]);
       expect(out, hasLength(1));
       expect(out.single['category'], '开会');
       expect(out.single['title'], '方案反馈');
       expect(out.single['_a'], 0);
       expect(out.single['_b'], 1500);
-      expect(out.single['people'], ['董老师', '刘康']);
+      expect(out.single['people'], ['董老师', '李航']);
       expect(out.single['actions'], hasLength(2)); // 去重在 run 里做
     });
 
@@ -153,7 +153,7 @@ void main() {
     late Store store;
     const stem = 'note20261020-190156';
     final t1 = [line('19:01:57', '我先讲一下品牌 VI 的方案'), line('19:10:00', '展厅这边分三个区')];
-    final t2 = [line('19:17:16', '董老师觉得配色要再亮一点'), line('19:20:00', '刘康负责展厅施工图')];
+    final t2 = [line('19:17:16', '董老师觉得配色要再亮一点'), line('19:20:00', '李航负责展厅施工图')];
     final t3 = [line('19:23:21', '那就按这个定稿')];
     final t4 = [line('19:36:16', '（电视声）')];
 
@@ -170,11 +170,11 @@ void main() {
            'title': '品牌VI提案讲解', 'event': '讲 VI 和展厅方案。', 'people': ['小冉老师', '董老师'], 'text': t1, 'body': '## 我讲了什么\n旧',
            'actions': [{'text': '把 VI 方案发给董老师', 'who': '我', 'done': true}], 'reminders': []},
           {'id': 'b', 'start': '2026-10-20T19:17:16', 'end': '2026-10-20T19:23:02', 'offset': 920.0, 'category': '开会',
-           'title': 'VI方案反馈与分工', 'event': '反馈并分工。', 'people': ['董老师', '刘康'], 'text': t2, 'body': '## 会议概要\n旧',
-           'actions': [{'text': '把VI方案发给董老师', 'who': ''}, {'text': '出展厅施工图', 'who': '刘康'}],
+           'title': 'VI方案反馈与分工', 'event': '反馈并分工。', 'people': ['董老师', '李航'], 'text': t2, 'body': '## 会议概要\n旧',
+           'actions': [{'text': '把VI方案发给董老师', 'who': ''}, {'text': '出展厅施工图', 'who': '李航'}],
            'reminders': [{'text': '周五前交施工图', 'when': '周五'}]},
           {'id': 'c', 'start': '2026-10-20T19:23:21', 'end': '2026-10-20T19:26:04', 'offset': 1285.0, 'category': '开会',
-           'title': '定稿讨论', 'event': '定稿。', 'people': ['陈总'], 'text': t3, 'body': '## 会议概要\n旧'},
+           'title': '定稿讨论', 'event': '定稿。', 'people': ['周总'], 'text': t3, 'body': '## 会议概要\n旧'},
           {'id': 'd', 'start': '2026-10-20T19:36:16', 'end': '2026-10-20T20:23:20', 'offset': 2060.0, 'category': '杂音',
            'title': '无有效内容', 'text': t4},
         ],
@@ -194,7 +194,7 @@ void main() {
       expect(m.d['start'], '2026-10-20T19:01:57');
       expect(m.d['end'], '2026-10-20T19:23:02');
       expect(m.offset, 1.0);
-      expect(m.people, ['小冉老师', '董老师', '刘康']);
+      expect(m.people, ['小冉老师', '董老师', '李航']);
       expect(m.actions.map((a) => a['text']), ['把 VI 方案发给董老师', '出展厅施工图']);
       expect(m.actions.first['done'], true); // 打过的勾带着
       expect(m.reminders.single['text'], '周五前交施工图');
@@ -219,7 +219,7 @@ void main() {
     test('整条录音当一段：所有非杂音段合一，后面的杂音留着', () async {
       final m = await store.mergeRecording(stem, note);
       expect(m.d['end'], '2026-10-20T19:26:04');
-      expect(m.people, ['小冉老师', '董老师', '刘康', '陈总']);
+      expect(m.people, ['小冉老师', '董老师', '李航', '周总']);
       expect(m.text, [...t1, ...t2, ...t3]);
       expect(store.scenes.single.id, 'a');
       expect(store.scenesOf(stem).map((s) => s.id), ['a', 'd']);

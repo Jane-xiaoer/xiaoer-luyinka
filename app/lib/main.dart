@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -91,6 +92,7 @@ Future<void> main() async {
   final memos = Platform.isMacOS
       ? VoiceMemoSyncer.instance = VoiceMemoSyncer(store, VoiceMemos(VoiceMemos.defaultDir()), () => syncer.run(fromCard: false))
       : null;
+  _watchJank(dir, syncer);
   runApp(LuyinkaApp(store: store, syncer: syncer, live: live, bean: bean));
   syncer.start();
   // Mac：本机识别模型（约 240MB）后台悄悄下好，录音就能在本机转（快很多）；没下好之前照常传云端
@@ -138,4 +140,41 @@ class LuyinkaApp extends StatelessWidget {
       ),
     ),
   );
+}
+
+
+/// 卡顿记录（11-13 Jane 说拉卡时整个卡死）：一帧超过 300 毫秒就在 <App 文件夹>/卡顿.log 记一行（几点、多久、当时在干什么），
+/// 2 秒最多记一行，文件超过 200KB 从头写。下次再卡，拿这个文件对。
+void _watchJank(Directory dir, Syncer syncer) {
+  final log = File('${dir.path}/卡顿.log');
+  var last = DateTime(2000);
+  void write(String what) {
+    final now = DateTime.now();
+    final busy = [for (final r in syncer.store.recs.values) if (r.stage != 'done' && r.stage != 'card') '${r.stem}:${r.stage}'].join(' ');
+    try {
+      if (log.existsSync() && log.lengthSync() > 200000) log.writeAsStringSync('');
+      log.writeAsStringSync('${now.toIso8601String().substring(0, 19)} $what 卡${syncer.card.connected ? '连着' : '没连'} $busy\n',
+          mode: FileMode.append);
+    } catch (_) {}
+  }
+
+  // 心跳：每 0.25 秒一下，晚到 1 秒以上 = 这段时间 Dart 一直被占着（界面点不动），不画帧也记得到
+  var beat = DateTime.now();
+  Timer.periodic(const Duration(milliseconds: 250), (_) {
+    final now = DateTime.now();
+    final late = now.difference(beat).inMilliseconds - 250;
+    beat = now;
+    if (late >= 1000) write('界面堵了 ${late}ms');
+  });
+  SchedulerBinding.instance.addTimingsCallback((timings) {
+    for (final t in timings) {
+      final ms = t.totalSpan.inMilliseconds;
+      if (ms < 300) continue;
+      final now = DateTime.now();
+      if (now.difference(last).inSeconds < 2) return;
+      last = now;
+      write('一帧 ${ms}ms（build ${t.buildDuration.inMilliseconds} · raster ${t.rasterDuration.inMilliseconds}）');
+      return;
+    }
+  });
 }

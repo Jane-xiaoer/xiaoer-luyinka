@@ -27,12 +27,27 @@ List<Todo> todosOf(List<Scene> scenes) {
     for (final s in sorted)
       for (final kind in const ['reminders', 'actions'])
         for (final (i, m) in s.pairs(kind).indexed)
-          if ('${m['text'] ?? ''}'.trim().isNotEmpty)
+          if ('${m['text'] ?? ''}'.trim().isNotEmpty && m['dismissed'] != true)
             Todo(s, kind, i,
                 text: '${m['text']}'.trim(),
                 who: '${m['who'] ?? ''}'.trim(),
                 when: '${m['when'] ?? ''}'.trim(),
                 done: m['done'] == true),
+  ];
+}
+
+/// 一条待办在那一段里的原始记录（带 said / speaker / project / confirmed 这些）。
+Map<String, dynamic> rawOf(Todo t) {
+  final l = t.scene.pairs(t.kind);
+  return t.index < l.length ? l[t.index] : const {};
+}
+
+/// 待确认：最近 [days] 天拆出来、还没确认过、没打勾、没撇掉的事，新的段在前。
+List<Todo> pendingTodos(List<Scene> scenes, {int days = 14, DateTime? now}) {
+  final since = (now ?? DateTime.now()).subtract(Duration(days: days));
+  return [
+    for (final t in todosOf(scenes))
+      if (!t.done && t.scene.start.isAfter(since) && rawOf(t)['confirmed'] != true) t,
   ];
 }
 
@@ -53,7 +68,8 @@ void carryDone(List oldScenes, List newScenes) {
       if (l is! List) continue;
       s[kind] = [
         for (final m in l)
-          if (m is Map && doneTexts.any((t) => sameTodo(t, '${m['text'] ?? ''}')))
+          // 笔记里来的勾以笔记为准，不按字面带
+          if (m is Map && m['from'] != 'note' && doneTexts.any((t) => sameTodo(t, '${m['text'] ?? ''}')))
             Map<String, dynamic>.from(m)..['done'] = true
           else
             m,

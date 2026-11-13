@@ -30,10 +30,13 @@ Future<void> makeDb(Directory d, List<(String path, String title, DateTime at, d
   expect(r.exitCode, 0, reason: '${r.stderr}');
 }
 
-/// 放一个「录音」文件；默认 1 小时前写好的（早就下完了）
+/// 测试里的「现在」（假钟）。放文件的默认修改时间也按它算，别用真钟——不然换一天跑，文件就成了「未来写的」、永远判成没下完。
+late DateTime clock;
+
+/// 放一个「录音」文件；默认（假钟的）1 小时前写好的（早就下完了）
 File put(Directory d, String name, {int bytes = 1000, DateTime? modified}) {
   final f = File('${d.path}/$name')..writeAsBytesSync(Uint8List(bytes));
-  f.setLastModifiedSync(modified ?? DateTime.now().subtract(const Duration(hours: 1)));
+  f.setLastModifiedSync(modified ?? clock.subtract(const Duration(hours: 1)));
   return f;
 }
 
@@ -46,7 +49,6 @@ void main() {
   late Store store;
   var converted = <String>[];
   var secs = <String, double?>{}; // 文件名 → 假的实际时长（没写 = 跟 db 一样长）
-  late DateTime clock;
   var woke = 0;
 
   VoiceMemoSyncer syncer({Map<String, double>? dbSecs}) => VoiceMemoSyncer(

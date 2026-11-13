@@ -5,7 +5,10 @@ import 'package:luyinka/templates.dart';
 void main() {
   test('标题、加粗、列表、代码块围栏都去掉', () {
     expect(plainNotes('```markdown\n## 渠道\n\n**结论**：先做华东\n- 王总：先做华东\n* 我倾向*华南*\n- [ ] 下周给预算\n```'),
-        '渠道\n\n结论：先做华东\n· 王总：先做华东\n· 我倾向华南\n· 下周给预算');
+        '渠道\n\n结论：先做华东\n· 王总：先做华东\n· 我倾向华南\n☐ 下周给预算');
+  });
+  test('Markdown 勾选框变成 ☐ / ☑', () {
+    expect(plainNotes('- [ ] 发报价\n  - [x] 约时间'), '☐ 发报价\n  ☑ 约时间');
   });
   test('数字编号、正常的星号乘法不动', () {
     expect(plainNotes('待办\n1. 王总出预算\n2. 3*4 的表格'), '待办\n1. 王总出预算\n2. 3*4 的表格');

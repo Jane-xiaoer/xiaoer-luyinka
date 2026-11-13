@@ -1,3 +1,4 @@
+import 'dart:io';
 // 自动更新：版本号比大小、这台设备该下哪个包、提醒条有新版才出来、「以后再说」就收起。
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -50,5 +51,10 @@ void main() {
     await tester.tap(find.text('以后再说'));
     await tester.pump();
     expect(find.textContaining('有新版'), findsNothing);
+  });
+  test('pubspec 里的版本在 whatsNew 里有说明（发版前忘了写，更新完的人就看不到这次改了什么）', () {
+    final v = RegExp(r'^version:\s*([\d.]+)', multiLine: true).firstMatch(File('pubspec.yaml').readAsStringSync())![1]!;
+    expect(whatsNew.containsKey(v), isTrue, reason: '在 lib/update.dart 的 whatsNew 里加上 $v');
+    expect(whatsNew[v]!.split('\n').first.length, lessThan(60));
   });
 }

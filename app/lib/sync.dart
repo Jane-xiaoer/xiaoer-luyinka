@@ -4,6 +4,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show ValueNotifier;
+
 import 'actions.dart';
 import 'analyze.dart';
 import 'card/client.dart';
@@ -13,6 +15,7 @@ import 'iphone.dart' show memoTitle;
 import 'llm.dart';
 import 'local_asr.dart';
 import 'progress.dart';
+import 'note_store.dart';
 import 'store.dart';
 import 'templates.dart' show fixWords;
 import 'todos.dart';
@@ -61,6 +64,10 @@ class Syncer {
   Timer? _timer;
   void Function()? onChange;
 
+  /// 只是进度变了（拉了多少、传到第几段、转写 / 整理到百分之几）：只让进度条、设备那一行重画，
+  /// 不叫整个主界面重画（Jane 11-13：「从卡上拉内容的时候整个都卡死了」——以前每 0.5 秒整页连同右边长纪要重画一遍）。
+  final tick = ValueNotifier<int>(0);
+
   late final Llm llm;
   Chat? chat; // 测试时换成假的
 
@@ -105,8 +112,15 @@ class Syncer {
     }
   }
 
+  /// 状态变了（换阶段、连上 / 断开）：存盘（存盘会叫主界面重画），进度条也跟着。
   void _changed() {
     store.save();
+    _ping();
+  }
+
+  /// 只有进度：存盘但不叫主界面重画
+  void _progressed() {
+    store.save(notify: false);
     _ping();
   }
 
@@ -117,7 +131,7 @@ class Syncer {
 
   void _ping() {
     observe(tracks, store.recs.values, DateTime.now());
-    onChange?.call();
+    tick.value++;
   }
 
   void start() {
@@ -311,7 +325,7 @@ class Syncer {
           final bytes = await raf.read(next.$2 - next.$1);
           // 云端回它实际有几段：重传了已有的、或跳了号，都按它说的接着来
           r.sent = await cloud.putPart(id, r.sent, bytes);
-          _changed();
+          _progressed();
         }
       } finally {
         await raf.close();
@@ -405,7 +419,7 @@ class Syncer {
     final res = await local!.transcribe(f, r.stem, store.audio(r.stem), progress: (p) {
       if (p != r.progress) {
         r.progress = p;
-        onChange?.call();
+        _ping();
       }
     }, fix: (t) => fixWords(t, vocab));
     await _done(r, res);
@@ -471,8 +485,8 @@ class Syncer {
         r.tried = now; // 索引读不出来（被 iCloud 挪到云上了）：过一会儿再试，别当成做完了
         continue;
       }
-      if (res == null) {
-        r.stage = 'done';
+      if (res == null || ((res['lines'] as List?) ?? const []).isEmpty && (res['scenes'] as List? ?? const []).isNotEmpty) {
+        r.stage = 'done'; // 没索引，或没有逐字稿但已经有段（随手记、只有笔记的会）：不整理，免得清空
         continue;
       }
       r
@@ -493,6 +507,7 @@ class Syncer {
           _ping();
         });
         carryDone(before, res['scenes']);
+        await store.syncNoteTodos(res); // 现场会议 / 随手记笔记里的 ☐：代码变成待办（笔记的勾为准）
         await store.putResult(r.stem, res);
         r
           ..stage = 'done'
@@ -510,6 +525,8 @@ class Syncer {
 
   /// 按（改过的）模板重新整理一条录音。
   Future<void> reanalyze(String stem) async {
+    // 随手记、没出字只有笔记的会：没有逐字稿，整理会把那一段清空（技术总监 11-13）——不走这条路
+    if (stem.startsWith('memo') || ((store.peekResult(stem)?['lines'] as List?) ?? const []).isEmpty) return;
     final r = store.recs.putIfAbsent(stem, () => Rec(stem, 0, 'transcribed')..deletedOnCard = true);
     r
       ..stage = 'transcribed'

@@ -28,7 +28,7 @@ String catKey(String c) => legacyCats[c] ?? c;
 String catFolder(String c) => cats.firstWhere((x) => x.key == catKey(c), orElse: () => const Cat('', '其他', '')).folder;
 
 /// 第一步：切场景 + 认类别 + 时间地点人物事件。
-String cutPrompt(List<String> subjects, {String vocab = ''}) => '''你在帮我整理录音卡录下的一段录音转写。录音卡别在我身上，录的是我一天里的开会、聊天、打电话、演讲、听课、自言自语。
+String cutPrompt(List<String> subjects, {String vocab = '', String people = '', String fixes = ''}) => '''你在帮我整理录音卡录下的一段录音转写。录音卡别在我身上，录的是我一天里的开会、聊天、打电话、演讲、听课、自言自语。
 转写一般不区分谁在说话；有的行钟点后面标了说话人（如「王总：……」），那是用户亲手标或按声纹认出来的，以它为准。会有错字（人名、品牌名尤其多），按上下文理解就行。每行开头是钟点。
 
 按「场合」把它切成「场景」，不按话题切：
@@ -48,12 +48,22 @@ ${[for (final c in cats) '  - ${c.key}：${c.hint}'].join('\n')}
 - place：录音里明确说到的地点；没说就留空，别猜
 - people：在场或提到的人名，原样写；不是具体的人别写
 - subject：只有「现场调研」填：调研的对象（哪家公司 / 哪个门店 / 哪个项目），4–12 字${subjects.isEmpty ? '' : '\n  以前调研过这些对象：${subjects.join('、')}。如果这次是同一个对象，subject 一字不差地用原名'}
-- actions：说定要做的事，没有具体时间的：{"t":"HH:MM:SS","text":"做什么","who":"谁去做，说不清留空"}
+- actions：说定要做的事，没有具体时间的：{"t":"HH:MM:SS","text":"做什么","who":"谁去做"}
+  说定要做的事都列出来，包括别人答应要做、答应要提供的事——别人的照样列，who 写他。
+  t 抄这件事出自的那一行的钟点（就是说出这件事的那句话，别抄前后的行）。
+  who 是「这件事归谁去做」，不是「谁说的」，按下面判断：
+  · 行首标了「我：」的是我（录音卡的主人）说的；标了别的名字的是那个人说的；标了「？：」的是没认出来的人，**不是我**。
+    「？：我去联系……」是那个没认出的人说他自己去，写「别人」，不是我。
+  · 说话人说自己要做（「我去联系」「我先跟那边对接」）→ 归说话人：标了「我：」写「我」，标了名字写那个名字，没标、又认不出是谁写「别人」。
+  · 别人对我 / 我们这边提要求（「你们先出个方案给我们看」「把报价单发我」）→ 写「我」。
+  · 说话人说他那边来提供 / 他们有 / 发给我们（「图纸我们这边出」「现场照片我们有，回头发你」「数据我们来整理好给你们」）→ 归说话人那一方：标了名字写名字，「？：」写「别人」。提供资料、素材、图片的多半是甲方，不是我。
+  · 我说「我来 / 我们这边先出」→ 写「我」。一个人自言自语的录音里，没标的行就是我说的。
+  · 实在看不出 → 留空，别猜。
 - reminders：说定要做、而且有具体日子或钟点的（约定、截止）：{"t":"HH:MM:SS","text":"做什么","when":"录音里说的时间原样写"}
   text 用动词开头的一句话，简洁书面语，保留人名、数字（如「把合同模板发给王总」）；同一件事只放一处，有时间的放 reminders
 没有的项给空数组 / 空字符串。
 
-铁律：不编。转写里没有的不写，推断的不写。数字、日期拿不准就照原话抄。${vocabBlock(vocab)}
+铁律：不编。转写里没有的不写，推断的不写。数字、日期拿不准就照原话抄。${vocabBlock(vocab)}${peopleBlock(people)}${fixesBlock(fixes)}
 
 只输出 JSON，不要别的字：
 {"scenes":[{"start":"","end":"","category":"","title":"","event":"","place":"","people":[],"subject":"","actions":[{"t":"","text":"","who":""}],"reminders":[{"t":"","text":"","when":""}]}]}''';
@@ -73,6 +83,41 @@ String vocabBlock(String vocab) {
   final v = vocab.trim();
   if (v.isEmpty) return '';
   return '\n\n下面是我常提到的人名 / 品牌 / 专有名词，转写里读音相近的错字按这里改（括号里写了常被转错成什么的，照着改回来）：\n$v';
+}
+
+/// 提示词里的「人员名单」一节（前面带空行）；没内容就是空串。
+String peopleBlock(String people) {
+  final p = people.trim();
+  if (p.isEmpty) return '';
+  return '\n\n下面是我录音里常出现的人（名字（叫法）｜身份｜常跟哪个项目｜备注｜公司）。认人、判断「归谁」时参照：'
+      '录音里出现这些叫法就是这个人；名字是「我」的那一行写的叫法（比如别人喊我的名字）就是我，这么叫我的事归我；'
+      '甲方提的要求、让我们这边做的，一般归我；合作方 / 甲方说他自己去办的，归他；乙方是我找来干活的，交代给他的归他；'
+      '分享者是讲座、课上讲东西的人：听课讲座里他讲的观点、经验和方法不是要我做的事，别拆成待办；但在会议、聊天里他交代我的事照常拆；'
+      '没别的线索时，这个人在场就先往他常跟的项目上想：\n$p';
+}
+
+/// 提示词里的「我纠正过的」一节（前面带空行）；没内容就是空串。
+String fixesBlock(String fixes) {
+  final f = fixes.trim();
+  if (f.isEmpty) return '';
+  return '\n\n下面是我以前亲手纠正过的拆事。照这个思路判断「归谁」「要不要进我的待办」，别照抄句子：\n$f';
+}
+
+/// 纠正记录（.xiaoer/纠正.jsonl 一行一条）→ 提示词里的一行。认不出的行跳过。
+String fixLine(Map<String, dynamic> r) {
+  final text = '${r['text'] ?? ''}'.trim(), said = '${r['said'] ?? ''}'.trim();
+  final fix = r['fix'] is Map ? r['fix'] as Map : const {};
+  final guess = r['guess'] is Map ? '${(r['guess'] as Map)['who'] ?? ''}' : '';
+  if (text.isEmpty) return '';
+  final verdict = switch ('${fix['kind']}') {
+    'not_mine_task' => '不进我的待办（不是我要做的事）',
+    'not_task' => '不算一件事，不用拆',
+    'owner' => '${fix['who']}' == '我' ? '是我的' : '是${fix['who']}的，不是我的',
+    'project' => '归「${fix['project']}」这个项目',
+    _ => '',
+  };
+  if (verdict.isEmpty) return '';
+  return '- 原话「$said」拆成「$text」${guess.isEmpty ? '' : '，当时猜归「$guess」'}→ $verdict';
 }
 
 /// 词汇表.md 第一次写进去的内容：只有说明和示例（都在「>」行里），等于没有词。
@@ -494,7 +539,9 @@ String plainNotes(String md) => md
     .where((l) => !RegExp(r'^\s*```').hasMatch(l))
     .map((l) => l
         .replaceFirst(RegExp(r'^\s{0,3}#{1,6}\s*'), '')
-        .replaceFirstMapped(RegExp(r'^(\s*)[-*+]\s+(\[[ xX]\]\s*)?'), (m) => '${m[1]}· ')
+        .replaceFirstMapped(RegExp(r'^(\s*)[-*+]\s+\[ \]\s*'), (m) => '${m[1]}☐ ')
+        .replaceFirstMapped(RegExp(r'^(\s*)[-*+]\s+\[[xX]\]\s*'), (m) => '${m[1]}☑ ')
+        .replaceFirstMapped(RegExp(r'^(\s*)[-*+]\s+'), (m) => '${m[1]}· ')
         .replaceAllMapped(RegExp(r'\*\*(.+?)\*\*'), (m) => m[1]!)
         .replaceAllMapped(RegExp(r'__(.+?)__'), (m) => m[1]!)
         .replaceAllMapped(RegExp(r'(?<![\w*])\*(?!\s)(.+?)(?<!\s)\*(?![\w*])'), (m) => m[1]!))
@@ -560,3 +607,103 @@ String fixWords(String text, List<VocabEntry> entries) {
   }
   return t;
 }
+
+/// 交给 Agent 的文字里的「谁去做」：「我」不写出来——Agent 读到「（我）」会以为是它自己；
+/// 没写谁就是录音卡主人自己要做的（跟以前空着时一样）。别人 / 人名照写。资料文件夹里的笔记也一样（整个文件夹会交给 AI）。App 里给人看的地方照原样显示「我」。
+String shownWho(Object? who) {
+  final w = '${who ?? ''}'.trim();
+  return w == '我' ? '' : w;
+}
+
+// ───────── 人员名单（资料文件夹/人员名单.md）─────────
+
+/// 名单上的一个人。文件里一行：「- 名字（叫法、叫法）｜身份｜常跟哪个项目｜备注｜公司」（公司是 11-11 加的第 5 栏，旧行没有）。
+class PersonEntry {
+  String name, identity, project, note, company;
+  List<String> aliases;
+  PersonEntry(this.name, {this.aliases = const [], this.identity = '', this.project = '', this.note = '', this.company = ''});
+
+  /// 跟的项目：一个人可以跟几个项目，「、」隔开（Jane 11-13：「要按项目分，不按照公司分」）。
+  List<String> get projects => [for (final x in project.split(RegExp(r'[、,，;；/／]'))) if (x.trim().isNotEmpty) x.trim()];
+
+  /// 左栏「按人」按什么分组：按项目（几个项目的放第一个），没写项目才按公司，都没有就是空（没分组）。
+  String get group => projects.isNotEmpty ? projects.first : company.trim();
+
+  /// 「按项目」里归到哪几组：每个项目一组；没写项目才按公司。
+  List<String> get groups => projects.isNotEmpty ? projects : [if (company.trim().isNotEmpty) company.trim()];
+
+  PersonEntry copy() => PersonEntry(name, aliases: [...aliases], identity: identity, project: project, note: note, company: company);
+
+  /// 「- 董老师（董老师、董哥）｜合作方｜青禾防灾片｜备注」→ 一个人；不是这个样子的行返回 null。
+  static PersonEntry? parse(String line) {
+    final l = line.trim();
+    if (!l.startsWith('- ')) return null;
+    final parts = l.substring(2).split('｜');
+    final head = parts[0].trim();
+    final m = RegExp(r'^(.*?)[（(](.*)[）)]$').firstMatch(head);
+    final name = (m?.group(1) ?? head).trim();
+    if (name.isEmpty) return null;
+    final aliases = [for (final a in (m?.group(2) ?? '').split(RegExp(r'[、,，]'))) if (a.trim().isNotEmpty) a.trim()];
+    String at(int i) => parts.length > i ? parts[i].trim() : '';
+    return PersonEntry(name, aliases: aliases, identity: at(1), project: at(2), note: at(3), company: at(4));
+  }
+
+  String get line {
+    // 一个人一行：换行、竖线会把格式拆坏，存之前换掉
+    String c(String x) => x.replaceAll(RegExp(r'\s*\n+\s*'), '；').replaceAll('｜', '/').replaceAll('|', '/').trim();
+    final al = {name, ...aliases}.map(c).where((x) => x.isNotEmpty).toList();
+    final tail = company.trim().isEmpty ? '' : '｜${c(company)}';
+    return '- ${c(name)}（${al.join('、')}）｜${c(identity)}｜${c(project)}｜${c(note)}$tail';
+  }
+}
+
+/// 在「按人」里删掉的人：整行资料留着（找回时原样放回名单）。listed = 删之前在名单上。
+class HiddenPerson {
+  final PersonEntry e;
+  final bool listed;
+  const HiddenPerson(this.e, {this.listed = false});
+
+  /// 文件里一行：名单上的人存整行「- 名字（叫法）｜…」，名单外的只存名字。
+  String get line => listed ? e.line : e.name.trim();
+  static HiddenPerson? parse(String l) {
+    final t = l.trim();
+    if (t.isEmpty) return null;
+    final p = PersonEntry.parse(t);
+    return p != null ? HiddenPerson(p, listed: true) : HiddenPerson(PersonEntry(t, aliases: [t]));
+  }
+}
+
+// 分享者：讲座、课上讲东西的人（Jane 11-12：「我去听讲座别人讲的东西，就是分享者」）；乙方：我找来干活的（供应商、外包）
+const personIdentities = ['合作方', '甲方', '乙方', '同事', '分享者', '朋友', '家人', '其他'];
+
+/// 人员名单.md 第一次写进去的说明。
+const defaultPeopleHead = """# 人员名单
+
+> 录音里常出现的人。小耳拆事时用它认说话人、判断「这件事归谁」。
+> 格式：一行一个「- 名字（叫法、叫法）｜身份｜常跟哪个项目｜备注｜公司」，没有的留空。身份：合作方 / 甲方 / 乙方 / 同事 / 分享者 / 朋友 / 家人 / 其他。
+> 叫法写全一点：录音里怎么喊的就怎么写（转写常听错的也写上，比如「阿星、阿西」）。
+> 以「>」开头的说明行小耳不看。也可以在 App 左栏「人员名单」里改。
+""";
+
+/// 名单文件 → （人，其他正文行）。其他行（标题、说明）存的时候原样留着。
+(List<PersonEntry>, List<String>) parsePeople(String raw) {
+  final people = <PersonEntry>[], extra = <String>[];
+  for (var l in raw.split('\n')) {
+    l = l
+        .replaceFirst('｜身份｜常跟哪个项目｜备注」', '｜身份｜常跟哪个项目｜备注｜公司」') // 旧说明行顺手更新
+        .replaceFirst('身份：合作方 / 甲方 / 同事 / 朋友 / 家人 / 其他。', '身份：合作方 / 甲方 / 乙方 / 同事 / 分享者 / 朋友 / 家人 / 其他。');
+    final p = PersonEntry.parse(l);
+    if (p != null) {
+      people.add(p);
+    } else {
+      extra.add(l);
+    }
+  }
+  while (extra.isNotEmpty && extra.last.trim().isEmpty) {
+    extra.removeLast();
+  }
+  return (people, extra);
+}
+
+String peopleMd(List<PersonEntry> people, List<String> extra) =>
+    [...(extra.isEmpty ? defaultPeopleHead.trimRight().split('\n') : extra), '', for (final p in people) if (p.name.trim().isNotEmpty) p.line, ''].join('\n');

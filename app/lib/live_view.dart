@@ -6,8 +6,11 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'carry_pick.dart';
 import 'live.dart';
-import 'templates.dart' show VocabEntry;
+import 'note_doc.dart';
+import 'note_edit.dart';
+import 'templates.dart' show PersonEntry, VocabEntry;
 import 'theme.dart';
 
 class LiveView extends StatefulWidget {
@@ -19,7 +22,7 @@ class LiveView extends StatefulWidget {
 }
 
 class _LiveViewState extends State<LiveView> {
-  late final _notes = TextEditingController(text: widget.live.notes);
+  late final _notes = NotesController(text: widget.live.notes);
   late final _title = TextEditingController(text: widget.live.title);
   final _ask = TextEditingController();
   final _scroll = ScrollController();
@@ -30,9 +33,24 @@ class _LiveViewState extends State<LiveView> {
   int _selRound = 0; // 加完笔记后换个 key，把拖选的高亮清掉
   bool _polishing = false;
   String? _undo; // 顺之前的笔记：撤回用
+  List<LineMeta> _undoMeta = const [];
   int _seen = 0;
 
   LiveSession get live => widget.live;
+
+  // 笔记里打「@」挑人用的名单：读文件，10 秒内不重读（新出一句原话界面就重画一次）
+  List<(String, List<String>, String)> _rosterCache = const [];
+  DateTime _rosterAt = DateTime(2000);
+  List<(String, List<String>, String)> _roster() {
+    if (DateTime.now().difference(_rosterAt).inSeconds >= 10) {
+      _rosterAt = DateTime.now();
+      _rosterCache = [
+        for (final p in live.store.lib.peopleEntries())
+          if (p.name != '我') (p.name, p.aliases, '${p.project} ${p.company}'),
+      ];
+    }
+    return _rosterCache;
+  }
 
   @override
   void initState() {
@@ -81,11 +99,15 @@ class _LiveViewState extends State<LiveView> {
     if (t.isEmpty) return;
     final cur = _notes.text.trimRight();
     final next = cur.isEmpty ? '$t\n' : '$cur\n\n$t\n';
+    // 挪来的这段记那句原话的时刻（找开头对得上的那句），会后点它就从那儿听
+    final head = t.split('\n').first;
+    final key = head.length > 6 ? head.substring(0, 6) : head;
+    final src = live.lines.where((l) => l.text.contains(key) || l.said.contains(key)).firstOrNull;
+    live.setNotes(next, src: 'clip', at: src == null || live.started == null ? null : src.at.difference(live.started!).inMilliseconds / 1000);
     _notes.value = TextEditingValue(
       text: next,
       selection: TextSelection.collapsed(offset: next.length),
     );
-    live.setNotes(next);
     _undo = null;
     // 拖选（含双击选中的词）的高亮只能换 key 重建来清；重建会丢滚动位置（Jane：加完就跳回最前面了），
     // 所以先记下、重建完放回去。只是点选 / 双击整句时不重建。
@@ -104,6 +126,16 @@ class _LiveViewState extends State<LiveView> {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('记到笔记了'), duration: Duration(milliseconds: 900), behavior: SnackBarBehavior.floating),
     );
+  }
+
+  /// 会上「带上没做完的事」：挑了插到笔记末尾（带着原来是哪条）
+  Future<void> _carry() async {
+    final picked = await pickCarry(context, live.store);
+    if (picked == null || picked.isEmpty || !mounted) return;
+    final (next, refs) = insertCarry(_notes.text, picked);
+    live.setNotes(next, src: 'carry', refs: refs);
+    _notes.value = TextEditingValue(text: next, selection: TextSelection.collapsed(offset: next.length));
+    _toast('带上了 ${picked.length} 条：会上打勾，原来那条也跟着勾；复制给别人时不带这一节');
   }
 
   void _toggle(int i) => setState(() => _picked.contains(i) ? _picked.remove(i) : _picked.add(i));
@@ -274,22 +306,54 @@ class _LiveViewState extends State<LiveView> {
     ),
   );
 
+  /// 「这是谁？」：输入一两个字就弹出人员名单里的人（名字、叫法都能搜，带公司 / 项目），点一下选好；名单里没有的照样直接打字。
   Future<String?> _askName() {
-    final c = TextEditingController();
+    final roster = live.store.lib.peopleEntries();
+    TextEditingController? typed; // 输入框（点「好」时取它的字）
+    bool matches(String q) => q.isNotEmpty && roster.any((p) => p.name.contains(q) || p.aliases.any((a) => a.contains(q)));
+    String label(PersonEntry p) => [p.name, if (p.company.isNotEmpty) p.company else if (p.project.isNotEmpty) p.project].join(' · ');
     return showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('这是谁？'),
-        content: TextField(
-          controller: c,
-          autofocus: true,
-          decoration: const InputDecoration(hintText: '名字或称呼，比如：王总、我、小李'),
-          onSubmitted: (v) => Navigator.pop(ctx, v),
+        content: SizedBox(
+          width: 320,
+          child: Autocomplete<PersonEntry>(
+            displayStringForOption: (p) => p.name,
+            optionsBuilder: (v) {
+              final q = v.text.trim();
+              if (q.isEmpty) return const [];
+              return roster.where((p) => p.name.contains(q) || p.aliases.any((a) => a.contains(q))).take(8);
+            },
+            onSelected: (p) => Navigator.pop(ctx, p.name),
+            fieldViewBuilder: (ctx2, c, focus, submit) => TextField(
+              controller: typed = c,
+              focusNode: focus,
+              autofocus: true,
+              decoration: const InputDecoration(hintText: '名字或称呼，比如：王总、我、小李（打一两个字会弹出名单上的人）'),
+              // 打了半个名字直接回车：下拉里有人就选高亮的那个（不然会存成「陈」、还进声纹）；名单外的才按打的字存
+              onSubmitted: (v) => matches(v.trim()) ? submit() : Navigator.pop(ctx, v),
+            ),
+            optionsViewBuilder: (ctx2, onSel, opts) => Align(
+              alignment: Alignment.topLeft,
+              child: Material(
+                elevation: 4,
+                borderRadius: BorderRadius.circular(8),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 240, maxWidth: 320),
+                  child: ListView(padding: EdgeInsets.zero, shrinkWrap: true, children: [
+                    for (final p in opts)
+                      ListTile(dense: true, leading: const Icon(Icons.person_outline, size: 18), title: Text(label(p)), onTap: () => onSel(p)),
+                  ]),
+                ),
+              ),
+            ),
+          ),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
           TextButton(
-            onPressed: () => Navigator.pop(ctx, c.text),
+            onPressed: () => Navigator.pop(ctx, typed?.text),
             child: Text('好', style: TextStyle(color: K.accent)),
           ),
         ],
@@ -308,7 +372,7 @@ class _LiveViewState extends State<LiveView> {
   }
 
   Future<void> _copyNotes() async {
-    final t = _notes.text.trim();
+    final t = notesForCopy(_notes.text, live.notesMeta);
     if (t.isEmpty) {
       _toast('笔记还是空的');
       return;
@@ -327,12 +391,19 @@ class _LiveViewState extends State<LiveView> {
     final before = _notes.text;
     try {
       live.setNotes(before);
-      final out = await live.polish(ask: _ask.text);
+      final keepMeta = [for (final m in live.notesMeta) m.copy()];
+      // 「带上没做完的」那几行不给小耳顺（不是这场会的内容），顺完原样接在后面，身份不丢
+      final ls = before.split('\n');
+      final carry = [for (final (i, l) in ls.indexed) if (i < keepMeta.length && keepMeta[i].src == 'carry') l];
+      final mine = [for (final (i, l) in ls.indexed) if (i >= keepMeta.length || keepMeta[i].src != 'carry') l].join('\n');
+      var out = await live.polish(ask: _ask.text, text: mine);
       if (!mounted) return;
       if (out.isEmpty) throw Exception('小耳没回内容');
+      if (carry.isNotEmpty) out = '${out.trimRight()}\n\n${carry.join('\n')}\n';
       _undo = before;
+      _undoMeta = keepMeta;
+      live.setNotes(out, src: 'ai');
       _notes.text = out;
-      live.setNotes(out);
       _ask.clear();
     } catch (e) {
       _toast('没顺成：${e.toString().replaceFirst('Exception: ', '')}');
@@ -344,7 +415,7 @@ class _LiveViewState extends State<LiveView> {
   void _revert() {
     if (_undo == null) return;
     _notes.text = _undo!;
-    live.setNotes(_undo!);
+    live.restoreNotes(_undo!, _undoMeta);
     setState(() => _undo = null);
   }
 
@@ -355,7 +426,12 @@ class _LiveViewState extends State<LiveView> {
     live.setTitle(_title.text.trim().isEmpty ? live.title : _title.text.trim());
     final s = await live.finish();
     if (!mounted) return;
-    if (s != null) _toast('收进录音卡了，正在整理；整理好在「按天」里能看到，也会进飞书');
+    if (s != null) {
+      final n = live.noteSummary;
+      _toast(live.lastNotesOnly
+          ? '只有笔记，已经收进录音卡（按天里能看到）${n == null ? '' : '。$n'}'
+          : '收进录音卡了，正在整理；整理好在「按天」里能看到，也会进飞书${n == null ? '' : '。$n'}');
+    }
   }
 
   Future<void> _discard() async {
@@ -851,24 +927,21 @@ class _LiveViewState extends State<LiveView> {
         ),
       ),
       Expanded(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 0, 18, 8),
-          child: TextField(
-            controller: _notes,
-            focusNode: _notesFocus,
-            maxLines: null,
-            expands: true,
-            textAlignVertical: TextAlignVertical.top,
-            style: TextStyle(fontSize: 15, height: 1.7, color: K.ink),
-            decoration: InputDecoration(
-              hintText: '边听边记。双击左边一句原话、或者选中一段，就挪到这里。',
-              hintStyle: TextStyle(color: K.faint, height: 1.7),
-            ),
-            onChanged: (v) {
-              live.setNotes(v);
-              if (_undo != null) setState(() => _undo = null);
-            },
-          ),
+        child: NotesEditor(
+          controller: _notes,
+          focusNode: _notesFocus,
+          people: _roster(),
+          onCarry: _carry,
+          fontSize: ((live.store.settings['notes_font'] as num?) ?? 15).toDouble(),
+          onFontSize: (f) {
+            setState(() => live.store.settings['notes_font'] = f);
+            live.store.save();
+          },
+          hint: '直接在这里打字记。点上面的 ☐ 记待办，点框就打勾。\n双击左边一句原话、或者选中一段，也能挪进来。',
+          onChanged: (v) {
+            live.setNotes(v);
+            if (_undo != null) setState(() => _undo = null);
+          },
         ),
       ),
       _aiBar(),

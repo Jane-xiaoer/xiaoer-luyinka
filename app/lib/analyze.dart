@@ -3,6 +3,7 @@
 import 'dart:convert';
 
 import 'library.dart';
+import 'note_doc.dart';
 import 'llm.dart';
 import 'store.dart';
 import 'templates.dart';
@@ -27,16 +28,23 @@ class Analyzer {
     final t0 = startOf(res, lines);
     final secs = [for (final l in lines) _offset(t0, l[0])];
     final subjects = await lib.subjects();
-    final vocab = lib.vocab();
+    final vocab = lib.vocab(), people = lib.people(), fixes = lib.fixes();
     // iPhone 语音备忘录上起的标题（常常就是地点）：当线索给模型
     final memo = (res['memo'] ?? '').toString().trim();
     var raw = <Map<String, dynamic>>[];
+    final marked = hasSpeakerMarks(lines);
+    final aliases = aliasMap(lib.peopleEntries()); // 人员名单的叫法 → 名字：拆出来的「归谁」「人物」统一成名单上的名字
+    // 现场会议我记的笔记（11-13）：切段时只当参考，按时间给这一窗的；没时间的行不进切段（技术总监：别让模型照笔记切碎）
+    final notes = '${res['notes'] ?? ''}';
+    final nmeta = metaOf(notes, res['notes_meta']);
     for (final (w, (lo, hi)) in windows(lines).indexed) {
+      final mine = notes.trim().isEmpty ? '' : notesForModel(notes, nmeta, from: secs[lo] - 1, to: secs[hi] + 60);
       final user = [
         if (memo.isNotEmpty) '（这条录音在 iPhone 上的标题：「$memo」，可当地点、事件的线索）',
-        for (var i = lo; i <= hi; i++) '[${lines[i][0]}] ${lines[i][1]}',
+        if (mine.isNotEmpty) '（我开会时在这一截记的笔记，只当参考，帮你看出我在意什么；切场景还是按场合，「☐」开头的是我自己记的待办，不用再拆：\n$mine\n）',
+        for (var i = lo; i <= hi; i++) feedLine(lines[i], marked),
       ].join('\n');
-      for (final s in parseScenes(await chat(cutPrompt(subjects, vocab: vocab), user))) {
+      for (final s in parseScenes(await chat(cutPrompt(subjects, vocab: vocab, people: people, fixes: fixes), user))) {
         var a = _clamp(t0, s['start'], secs[lo], secs[hi]), b = _clamp(t0, s['end'], secs[lo], secs[hi]);
         if (b < a) (a, b) = (b, a);
         raw.add(s
@@ -69,6 +77,7 @@ class Analyzer {
       final start = t0.add(Duration(seconds: a.round())), end = t0.add(Duration(seconds: b.round()));
       var cat = catKey((s['category'] ?? '').toString());
       if (cat != noiseCat && !cats.any((c) => c.key == cat)) cat = '多人群聊';
+      final text = [for (final (j, l) in lines.indexed) if (secs[j] >= a && secs[j] < until) l];
       out.add({
         'id': '${_stamp(start)}-lyk',
         'recording': stem,
@@ -79,20 +88,59 @@ class Analyzer {
         'title': _str(s['title'], 30),
         'event': _str(s['event']),
         'place': _str(s['place']),
-        'people': _strs(s['people']),
+        'people': {for (final x in _strs(s['people'])) aliases[x] ?? x}.toList(),
         'subject': cat == '现场调研' ? _str(s['subject'], 24) : '',
         'reminders': uniqTodos(_pairs(s['reminders'], 'when')),
-        'actions': dedupeActions(uniqTodos(_pairs(s['actions'], 'who')), _pairs(s['reminders'], 'when')),
-        'text': [for (final (j, l) in lines.indexed) if (secs[j] >= a && secs[j] < until) l],
+        'actions': dedupeActions(uniqTodos([for (final a in tidyActions(s['actions'], text, solo: soloCats.contains(cat))) {...a, 'who': aliases['${a['who']}'] ?? a['who']}]), _pairs(s['reminders'], 'when')),
+        'text': text,
         'body': '',
       });
     }
+    final mine = lib.fixesFor(stem); // 这条录音我纠正过的：记住，不让模型重猜
+    if (mine.isNotEmpty) {
+      final ids = {for (final s in out) '${s['id']}'};
+      for (final s in out) {
+        for (final k in const ['actions', 'reminders']) {
+          s[k] = applyFixes(List<Map<String, dynamic>>.from(s[k] as List), mine, sceneId: '${s['id']}', sceneIds: ids, list: k);
+        }
+      }
+    }
     var done = 0;
-    for (final s in out) {
-      progress?.call(done++, out.length);
-      s['body'] = await note(Scene(s, stem));
+    _res = res;
+    _cut = out;
+    try {
+      for (final s in out) {
+        progress?.call(done++, out.length);
+        s['body'] = await note(Scene(s, stem));
+      }
+    } finally {
+      _res = null;
+      _cut = const [];
     }
     return out;
+  }
+
+  /// 这一段时间里我记的笔记（现场会议 / 随手记）：读这条录音的索引；整理途中（run）用正在切的段算范围。
+  Map<String, dynamic>? _res;
+  List<Map<String, dynamic>> _cut = const [];
+  String _myNotes(Scene s) {
+    if (!s.stem.startsWith('live') && !s.stem.startsWith('memo')) return '';
+    Map<String, dynamic>? res = _res;
+    var scenes = _cut;
+    if (res == null) {
+      try {
+        final f = lib.data(s.stem);
+        if (!f.existsSync()) return '';
+        res = Map<String, dynamic>.from(jsonDecode(f.readAsStringSync()));
+        scenes = [for (final x in (res['scenes'] as List? ?? const [])) Map<String, dynamic>.from(x as Map)];
+      } catch (_) {
+        return '';
+      }
+    }
+    final i = scenes.indexWhere((x) => x['id'] == s.id);
+    final real = [for (final x in scenes) if (x['category'] != noiseCat) x['id']];
+    final to = i >= 0 && i + 1 < scenes.length ? ((scenes[i + 1]['offset'] as num?)?.toDouble() ?? double.infinity) : double.infinity;
+    return myNotesIn(res, s.offset, to, first: real.isNotEmpty && real.first == s.id);
   }
 
   /// 一段 → 按它那一类的模板写成的笔记（Markdown）。太短 / 杂音返回空。
@@ -108,6 +156,12 @@ class Analyzer {
       if (s.subject.isNotEmpty) '调研对象：${s.subject}',
     ].join('\n');
     var user = '## 这一段\n$head\n\n## 转写\n${text.length > noteChars ? text.substring(0, noteChars) : text}';
+    final mine = _myNotes(s);
+    if (mine.isNotEmpty) {
+      user += '\n\n## 我当时记的笔记（这一段的）\n$mine\n\n'
+          '（这是我自己边听边记的，是我觉得重要的：整理时以它为主线，我记的观点、判断、倾向都要留着，不要改成中立；'
+          '转写只用来补全我没记全的细节、改错字。「☐」开头的是我的待办，照样列进待办。）';
+    }
     if (cat == '现场调研' && s.subject.isNotEmpty) {
       final before = await lib.subjectHistory(s.subject, except: s.id);
       if (before.isNotEmpty) user += '\n\n## 以前对「${s.subject}」的调研记录（当背景，用来对比，不要抄进这次的关键信息）\n$before';
@@ -115,6 +169,21 @@ class Analyzer {
     final out = await chat(notePrompt(await lib.template(cat), vocab: lib.vocab()), user);
     return out.replaceAll(RegExp(r'^```(markdown|md)?\s*|\s*```$'), '').trim();
   }
+}
+
+/// [from]-[to] 秒里我记的笔记；[first] 是第一段时另带上没记时间的行（不含「带上没做完的」）。
+String myNotesIn(Map<String, dynamic> res, double from, double to, {bool first = false}) {
+  final notes = '${res['notes'] ?? ''}';
+  if (notes.trim().isEmpty) return '';
+  final meta = metaOf(notes, res['notes_meta']);
+  final timed = notesForModel(notes, meta, from: from, to: to);
+  if (!first) return timed;
+  final untimed = [
+    for (final (j, l) in notes.split('\n').indexed)
+      if (j < meta.length && meta[j].at == null && meta[j].src != 'carry' && l.trim().isNotEmpty)
+        stripInline(l.replaceFirst(RegExp(r'^#{1,2} '), '')),
+  ].join('\n');
+  return [timed, untimed].where((x) => x.isNotEmpty).join('\n');
 }
 
 /// 开录时刻（墙上时间）：云端给的 start，没有就用第一行的钟点配今天。
@@ -302,6 +371,178 @@ String _str(Object? x, [int? max]) {
 }
 
 List<String> _strs(Object? xs) => xs is List ? [for (final x in xs) if ('$x'.trim().isNotEmpty) '$x'.trim()] : [];
+
+/// 说「我们提供 / 给你们 / 发给你」的是给东西的一方（多半甲方），兜底不清他的「别人」。
+final _provides = RegExp(r'提供|给你|发给|发你');
+
+/// 单数的「我」（后面不是「们」）。
+final _singularI = RegExp(r'我(?!们)');
+
+/// 逐字稿行首的说话人标注（「练：……」「我：……」，用户亲手标的或按声纹认出来的）。没标就是 null。
+final _speakerMark = RegExp(r'^([^\s：:，。,、]{1,8})：');
+
+/// 这条录音认过人没有：有「我：」开头的行（现场会议亲手标过 / 声纹认出了我）。
+bool hasSpeakerMarks(List<List<String>> lines) => lines.any((l) => l[1].startsWith('我：'));
+
+/// 喂给模型的一行。认过人的录音里，没标说话人的行补上「？：」——那是没认出的人，不是我。
+/// 不补的话，模型看到「我我联系李航」里的「我」就当成录音卡主人要去做（2026-11-04 #244 就是这么错的）。
+/// 只改喂给模型的，存下来的逐字稿不动。
+String feedLine(List<String> l, bool marked) =>
+    '[${l[0]}] ${marked && _speakerMark.firstMatch(l[1]) == null ? '？：' : ''}${l[1]}';
+
+/// 这件事出自哪一行：钟点一样的那行；对不上就取它之前最近的一行。没钟点 / 找不到就是 null。
+/// 给了 [what]（拆出来的那件事）时再核一下：模型偶尔把钟点抄成前后的行（11-04 回放 5 次错 2 次），
+/// 那一行跟这件事几乎不沾边、这一段里另有一行明显说的就是它，就改用那一行。
+List<String>? sourceLine(String t, List<List<String>> lines, {String what = ''}) {
+  List<String>? byClock;
+  if (RegExp(r'^\d{1,2}:\d\d(:\d\d)?$').hasMatch(t)) {
+    final key = (t.split(':').length == 2 ? '$t:00' : t).padLeft(8, '0');
+    for (final l in lines) {
+      final c = l[0].padLeft(8, '0');
+      if (c == key) {
+        byClock = l;
+        break;
+      }
+      if (c.compareTo(key) < 0) byClock = l;
+    }
+  }
+  if (what.isEmpty) return byClock;
+  final want = _grams(what);
+  double score(List<String> l) => want.isEmpty ? 0 : want.intersection(_grams(l[1])).length / want.length;
+  if (byClock != null && score(byClock) >= 0.3) return byClock;
+  List<String>? best;
+  var top = 0.0;
+  for (final l in lines) {
+    final s = score(l);
+    if (s > top) (best, top) = (l, s);
+  }
+  return top >= 0.4 ? best : byClock;
+}
+
+Set<String> _grams(String t) {
+  final c = t.replaceAll(RegExp(r'[\s，。、,.（）()！？!?：:“”"]'), '');
+  return {for (var i = 0; i + 1 < c.length; i++) c.substring(i, i + 2)};
+}
+
+/// 我的纠正「记住」：同一条录音重新整理时，按 .xiaoer/纠正.jsonl 里这条录音的纠正，把对应的那件事改回我选的。
+/// 找对应：出处钟点相差 60 秒以内，再挑内容最像的那件（两字片段重合最多）；同一钟点只有一件、字面不像也算。
+/// 一件事可以有几条纠正（先改归属、再换项目），按写入先后都套上，同一种的后写的算数。改了的带 fixed，模型下次怎么猜都不影响。
+/// - owner：who 改成我选的人（「我」或别人的名字；别人的照样留着，算「别人答应的事」）
+/// - not_mine_task：不进我的待办（dismissed），who 原来是「我」/ 空的改成「别人」
+/// - not_task：不算一件事（dismissed）
+/// - project：换到我选的项目（project）
+List<Map<String, dynamic>> applyFixes(List<Map<String, dynamic>> actions, List<Map<String, dynamic>> fixes,
+    {String? sceneId, Set<String> sceneIds = const {}, String list = 'actions'}) {
+  final out = [for (final a in actions) Map<String, dynamic>.from(a)];
+  // 只认这个列表（行动 / 提醒）的纠正；记了是哪一段的，那一段还在就只套那一段（不串到同一条录音的别的段），
+  // 那一段没了（重新切过场景、段号变了）才在整条录音里找
+  fixes = [
+    for (final f in fixes)
+      if ('${f['list'] ?? 'actions'}' == list &&
+          (f['scene'] == null || f['scene'] == sceneId || !sceneIds.contains('${f['scene']}')))
+        f,
+  ];
+  double? secs(Object? t) {
+    final m = RegExp(r'^(\d{1,2}):(\d\d)(?::(\d\d))?$').firstMatch('${t ?? ''}');
+    return m == null ? null : int.parse(m[1]!) * 3600.0 + int.parse(m[2]!) * 60 + int.parse(m[3] ?? '0');
+  }
+
+  final claimed = <int, List<int>>{}; // 第几件事 → 套在它上面的纠正（按写入先后）
+  for (final (fi, f) in fixes.indexed) {
+    final ft = secs(f['t']);
+    final want = _grams('${f['text'] ?? ''}');
+    // 没钟点的纠正（旧数据里有的事没钟点）：整条录音里按内容找，要字面很像（下面 0.6）才算
+    final near = [
+      for (final (i, a) in out.indexed)
+        if (a['from'] != 'note' && (ft == null || (secs(a['t']) != null && (secs(a['t'])! - ft).abs() <= 60))) i,
+    ];
+    int? best;
+    var top = 0.0;
+    for (final i in near) {
+      final got = _grams('${out[i]['text']}');
+      final s = want.isEmpty ? 0.0 : want.intersection(got).length / want.length;
+      if (s > top) (best, top) = (i, s);
+    }
+    if (ft == null && top < 0.6) continue;
+    if (ft != null && top < 0.25 && f['scene'] != sceneId) best = null; // 别的段 / 没记段的：字面得沾边
+    // 同一钟点只有一件、字面不像也算：只限纠正记的正是这一段
+    final sameClock = [for (final i in near) if (ft != null && f['scene'] != null && f['scene'] == sceneId && secs(out[i]['t']) == ft) i];
+    if (best == null && sameClock.length == 1) best = sameClock.single;
+    if (best == null) continue;
+    (claimed[best] ??= []).add(fi);
+  }
+  for (final MapEntry(key: i, value: fis) in claimed.entries) {
+    final a = out[i];
+    for (final fi in fis) {
+      final fix = fixes[fi]['fix'] is Map ? fixes[fi]['fix'] as Map : const {};
+      switch ('${fix['kind']}') {
+        case 'owner':
+          a['who'] = '${fix['who'] ?? ''}';
+          a.remove('dismissed');
+          a['fixed'] = 'owner';
+        case 'not_mine_task':
+          if ('${a['who'] ?? ''}' == '我' || '${a['who'] ?? ''}'.isEmpty) a['who'] = '别人';
+          a['dismissed'] = true;
+          a['fixed'] = 'not_mine_task';
+        case 'not_task':
+          a['dismissed'] = true;
+          a['fixed'] = 'not_task';
+        case 'project':
+          a['project'] = '${fix['project'] ?? ''}';
+          continue; // 换项目不算确认
+        default:
+          continue;
+      }
+      a['confirmed'] = true;
+    }
+  }
+  return out;
+}
+
+/// 人员名单 → 叫法到名字的对照（「阿西」→「阿星」「练总」→「练」）。名字本身不放进去；两个人用了同一个叫法就谁都不换。
+Map<String, String> aliasMap(List<PersonEntry> people) {
+  final m = <String, String>{}, dup = <String>{};
+  // 叫法等于名单上任何一个人的名字（给李航补了「李总」、名单上另有一个李总）、或者是保留词，都不换：不能把别人的事串过去
+  final names = {for (final p in people) p.name, '我', '别人', '我们', '你', '你们'};
+  for (final p in people) {
+    for (final a in p.aliases) {
+      if (a.isEmpty || names.contains(a)) continue;
+      if (m.containsKey(a) && m[a] != p.name) dup.add(a);
+      m[a] = p.name;
+    }
+  }
+  for (final d in dup) {
+    m.remove(d);
+  }
+  return m;
+}
+
+/// 只有我一个人在说的类别：这里拆出来的事，模型没写归谁就是我的（回放里偶尔会空着）。
+const soloCats = {'自言自语', '个人感悟'};
+
+/// 模型拆出来的行动 → 去空、补上 speaker（谁说的）和 said（原话那一句）。
+/// who = 这件事归谁去做（「我」= 录音卡主人；人名；说不清留空），由模型按上下文判断。
+/// speaker 不信模型：以逐字稿行首的标注为准，没标就是空（没认出是谁）。「谁说的」≠「归谁」：
+/// 别人说「我去对接」归他，别人说「你们做个样板」归我，所以两样分开存。
+List<Map<String, dynamic>> tidyActions(Object? xs, List<List<String>> lines, {bool solo = false}) => [
+      for (final a in _pairs(xs, 'who'))
+        () {
+          final src = sourceLine('${a['t']}', lines, what: '${a['text']}');
+          final text = src?[1] ?? '';
+          final m = _speakerMark.firstMatch(text);
+          final said = (m == null ? text : text.substring(m.end)).trim();
+          return {
+            ...a,
+            if (src != null) 't': src[0], // 钟点跟着出处走：点它就从这句播
+            if (solo && '${a['who']}'.isEmpty) 'who': '我',
+            // 没认出的人明说「我们来做 / 我们按你的来」、又没说单数「我」：可能是我这边的同事，别信「别人」，留空交给我确认
+            // （11-04 22:41:05 回放 3/3 判成别人）。原话里没有「我们」的（如甲方说要交资料）不动
+            if (m == null && a['who'] == '别人' && said.contains('我们') && !_singularI.hasMatch(said) && !_provides.hasMatch(said)) 'who': '',
+            'speaker': m?.group(1) ?? '',
+            'said': said.length > 80 ? '${said.substring(0, 80)}…' : said,
+          };
+        }(),
+    ];
 
 List<Map<String, dynamic>> _pairs(Object? xs, String extra) => [
       if (xs is List)

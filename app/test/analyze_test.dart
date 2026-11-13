@@ -89,6 +89,27 @@ void main() {
         contains('（[笔记](<../会议纪要/2026-10-19 09.30 排期会.md>)）'));
   });
 
+  test('每日时间线：别人的事写明是谁的、不给勾选框（宙 #297）', () async {
+    final s = Scene({
+      'id': 'y', 'start': '2026-10-19T10:00:00', 'end': '2026-10-19T10:01:00', 'category': '开会', 'title': '会',
+      'actions': [
+        {'text': '提供案例资料', 'who': '欧', 'done': true},
+        {'text': '先出脚本', 'who': '我', 'done': true},
+        {'text': '要资料', 'who': '别人'},
+        {'text': '一起排期', 'who': '我们'},
+        {'text': '没写谁'},
+      ],
+    }, 'note20261019-100000');
+    await lib.writeDay('2026-10-19', [s]);
+    final md = File('${lib.path}/每日/2026-10-19.md').readAsStringSync();
+    expect(md, contains('  - 欧的：提供案例资料\n'));
+    expect(md, isNot(contains('[x] 提供案例资料')));
+    expect(md, contains('  - [x] 先出脚本\n'));
+    expect(md, contains('  - 别人的：要资料\n'));
+    expect(md, contains('  - [ ] 一起排期\n'));
+    expect(md, contains('  - [ ] 没写谁\n'));
+  });
+
   test('改了模板就按改过的整理', () async {
     await lib.templateFile('开会').writeAsString('只写一句话总结');
     String? seen;
