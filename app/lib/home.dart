@@ -1885,51 +1885,60 @@ class GroupColumn extends StatelessWidget {
     if (group == null) return const Hint('wave', '还没有项目', '到「按人」里给人写上跟哪个项目，同一个项目的人就会归到一起。');
     final g = group!;
     final total = scenes.fold<Duration>(Duration.zero, (a, s) => a + s.end.difference(s.start));
-    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      Padding(
-        padding: EdgeInsets.fromLTRB(24, top, 20, 12),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(g.name, style: K.title(26).copyWith(color: K.ink)),
-          const SizedBox(height: 2),
-          const Squiggle(width: 132),
-          const SizedBox(height: 10),
-          Wrap(spacing: 6, runSpacing: 6, children: [
-            _Stat(Icons.view_agenda_outlined, '${scenes.length} 段'),
-            _Stat(Icons.mic_none, '共 ${duration(total)}'),
-            for (final c in {for (final p in g.members) (p.entry?.company ?? '').trim()}.where((c) => c.isNotEmpty))
-              _Stat(Icons.apartment_outlined, c),
-          ]),
-          const SizedBox(height: 10),
-          Wrap(spacing: 6, runSpacing: 6, children: [
-            for (final p in g.members)
-              ActionChip(
-                avatar: Icon(Icons.person_outline, size: 15, color: K.accent),
-                // 谁 · 跟我什么关系 · 哪家公司
-                label: Text([
-                  p.name,
-                  if ((p.entry?.identity ?? '').isNotEmpty) p.entry!.identity,
-                  if ((p.entry?.company ?? '').trim().isNotEmpty) p.entry!.company.trim(),
-                ].join(' · ')),
-                tooltip: (p.entry?.note ?? '').isEmpty ? '去按人看${p.name}' : p.entry!.note,
-                onPressed: () => onPerson(p.name),
-              ),
-          ]),
-        ]),
-      ),
-      Expanded(
-        child: AskBox(
-          key: askKey, store: store, scenes: scenes, all: store.scenes, onOpen: onOpen,
-          topic: 'group:${g.name}', focus: _focus(scenes, selected),
-          hint: '问问小耳：跟${g.name}之间…也可以让它帮你准备见面',
-          child: ListView(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6), children: [
-            PersonSummary(name: g.name, scenes: scenes, roster: roster, todos: todosInGroup(scenes, g.names, roster),
-                onPrep: () => onPrep(g), onOpen: onPick),
-            const SizedBox(height: 10),
-            for (final s in scenes) SceneRow(scene: s, selected: s.id == selected, onTap: () => onPick(s), showDate: true),
-          ]),
+    // 组里人多时，头部会把下面的录音列表挤到没有高度。给头部一个上限，
+    // 超出的人在头部里滚动，列表始终分得到空间。
+    return LayoutBuilder(builder: (context, constraints) {
+      final maxHead = (constraints.maxHeight * 0.38).clamp(140.0, 260.0).toDouble();
+      return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: maxHead),
+          child: SingleChildScrollView(
+            padding: EdgeInsets.fromLTRB(24, top, 20, 12),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(g.name, style: K.title(26).copyWith(color: K.ink)),
+              const SizedBox(height: 2),
+              const Squiggle(width: 132),
+              const SizedBox(height: 10),
+              Wrap(spacing: 6, runSpacing: 6, children: [
+                _Stat(Icons.view_agenda_outlined, '${scenes.length} 段'),
+                _Stat(Icons.mic_none, '共 ${duration(total)}'),
+                _Stat(Icons.people_outline, '${g.members.length} 人'),
+                for (final c in {for (final p in g.members) (p.entry?.company ?? '').trim()}.where((c) => c.isNotEmpty))
+                  _Stat(Icons.apartment_outlined, c),
+              ]),
+              const SizedBox(height: 10),
+              Wrap(spacing: 6, runSpacing: 6, children: [
+                for (final p in g.members)
+                  ActionChip(
+                    avatar: Icon(Icons.person_outline, size: 15, color: K.accent),
+                    // 谁 · 跟我什么关系 · 哪家公司
+                    label: Text([
+                      p.name,
+                      if ((p.entry?.identity ?? '').isNotEmpty) p.entry!.identity,
+                      if ((p.entry?.company ?? '').trim().isNotEmpty) p.entry!.company.trim(),
+                    ].join(' · ')),
+                    tooltip: (p.entry?.note ?? '').isEmpty ? '去按人看${p.name}' : p.entry!.note,
+                    onPressed: () => onPerson(p.name),
+                  ),
+              ]),
+            ]),
+          ),
         ),
-      ),
-    ]);
+        Expanded(
+          child: AskBox(
+            key: askKey, store: store, scenes: scenes, all: store.scenes, onOpen: onOpen,
+            topic: 'group:${g.name}', focus: _focus(scenes, selected),
+            hint: '问问小耳：跟${g.name}之间…也可以让它帮你准备见面',
+            child: ListView(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6), children: [
+              PersonSummary(name: g.name, scenes: scenes, roster: roster, todos: todosInGroup(scenes, g.names, roster),
+                  onPrep: () => onPrep(g), onOpen: onPick),
+              const SizedBox(height: 10),
+              for (final s in scenes) SceneRow(scene: s, selected: s.id == selected, onTap: () => onPick(s), showDate: true),
+            ]),
+          ),
+        ),
+      ]);
+    });
   }
 }
 
